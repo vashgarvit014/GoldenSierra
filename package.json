@@ -1,0 +1,63 @@
+{
+  "name": "golden-sierra-workforce-navigator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-powered, retrieval-grounded workforce assistance chatbot for Golden Sierra Job Training Agency",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "ingest": "tsx scripts/ingest.ts",
+    "ingest:worker": "tsx scripts/worker.ts",
+    "vector:init": "tsx scripts/init-vector.ts",
+    "eval": "tsx scripts/eval.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup": "tsx scripts/setup-check.ts"
+  },
+  "dependencies": {
+    "@langchain/textsplitters": "^1.0.2",
+    "@prisma/client": "^6.19.3",
+    "@qdrant/js-client-rest": "^1.20.0",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^6.7.5",
+    "cheerio": "^1.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dotenv": "^18.0.10",
+    "ioredis": "^6.0.0",
+    "jose": "^6.2.17",
+    "lucide-react": "^0.552.0",
+    "next": "^16.4.6",
+    "openai": "^7.55.0",
+    "p-limit": "^7.3.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "robots-parser": "^3.0.1",
+    "tailwind-merge": "^3.3.1",
+    "unpdf": "^2.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "prisma": "^6.19.3",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,529 @@
+// Golden Sierra Workforce Navigator — PostgreSQL schema
+// Postgres is the system of record. Qdrant holds only embeddings plus the
+// metadata needed to filter them; every Qdrant point carries `chunkId`, which
+// maps back to DocumentChunk.id here so deletions stay consistent.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Access control ───────────────────────────
+
+enum AdminRole {
+  VIEWER // read-only dashboard
+  EDITOR // manage sources, documents, programs
+  ADMIN  // everything, including AI config and user management
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  role         AdminRole @default(VIEWER)
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sources      KnowledgeSource[]
+  auditEntries AuditLog[]
+
+  @@index([email])
+}
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  actorId   String?
+  actor     AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime  @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────── Knowledge sources ─────────────────────────
+
+enum SourceType {
+  WEBSITE
+  SITEMAP
+  SINGLE_PAGE
+  PDF_UPLOAD
+  MANUAL
+}
+
+enum SourceStatus {
+  ACTIVE
+  PAUSED
+  FAILED
+}
+
+/// An authorized origin of knowledge. The crawler will only ever visit hosts
+/// that appear here AND in CRAWL_ALLOWED_HOSTS — authorization is explicit.
+model KnowledgeSource {
+  id              String       @id @default(cuid())
+  name            String
+  type            SourceType
+  rootUrl         String?
+  /// Regex strings; a URL must match at least one to be crawled (when present).
+  includePatterns String[]     @default([])
+  /// Regex strings; a URL matching any of these is skipped.
+  excludePatterns String[]     @default([])
+  maxDepth        Int          @default(3)
+  maxPages        Int          @default(200)
+  respectRobots   Boolean      @default(true)
+  /// Default category applied to documents from this source.
+  defaultCategory String?
+  status          SourceStatus @default(ACTIVE)
+  recrawlCron     String?
+  lastCrawledAt   DateTime?
+  createdById     String?
+  createdBy       AdminUser?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  documents Document[]
+  jobs      IngestionJob[]
+
+  @@index([status])
+}
+
+// ─────────────────────────── Documents ─────────────────────────────────
+
+enum DocumentType {
+  WEB_PAGE
+  PDF
+  MANUAL_ENTRY
+}
+
+enum DocumentStatus {
+  PENDING    // discovered, not yet extracted
+  EXTRACTED  // text available, not yet embedded
+  INDEXED    // embedded and live in Qdrant
+  FAILED
+  ARCHIVED   // superseded or withdrawn; must not be retrievable
+}
+
+enum AccessLevel {
+  PUBLIC
+  INTERNAL
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  sourceId    String?
+  source      KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+
+  url         String?
+  canonicalUrl String?
+  title       String
+  /// Cleaned, extraction-ready plain text.
+  content     String         @db.Text
+  summary     String?        @db.Text
+  type        DocumentType
+  status      DocumentStatus @default(PENDING)
+  accessLevel AccessLevel    @default(PUBLIC)
+
+  // ── Classification metadata (drives retrieval filters) ──
+  category    String?
+  audience    String?   // job_seeker | employer | both | agency
+  programName String?
+  counties    String[]  @default([])
+  tags        String[]  @default([])
+  language    String    @default("en")
+
+  // ── Provenance / freshness ──
+  contentHash   String
+  version       Int       @default(1)
+  publishedAt   DateTime?
+  lastVerifiedAt DateTime?
+  crawledAt     DateTime?
+  httpStatus    Int?
+  wordCount     Int       @default(0)
+  failureReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks   DocumentChunk[]
+  versions DocumentVersion[]
+  programs ProgramDocument[]
+
+  @@unique([url, language])
+  @@index([status])
+  @@index([category])
+  @@index([contentHash])
+  @@index([sourceId])
+}
+
+/// Immutable history so a change to a live page can be audited and rolled back.
+model DocumentVersion {
+  id          String   @id @default(cuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  version     Int
+  title       String
+  content     String   @db.Text
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  @@unique([documentId, version])
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  ordinal     Int
+  content     String  @db.Text
+  /// Heading trail ("Help for Job Seekers > Apply for a Scholarship") kept with
+  /// the chunk so eligibility text never loses the rule it belongs to.
+  headingPath String?
+  tokenCount  Int     @default(0)
+  contentHash String
+
+  /// Qdrant point id for this chunk. Null until embedded.
+  vectorId  String?
+  embeddedAt DateTime?
+  embeddingModel String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([documentId, ordinal])
+  @@index([vectorId])
+}
+
+// ─────────────────────────── Ingestion jobs ────────────────────────────
+
+enum JobType {
+  CRAWL
+  REINDEX
+  PDF_INGEST
+  DELETE_DOCUMENT
+  FULL_REBUILD
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model IngestionJob {
+  id        String    @id @default(cuid())
+  sourceId  String?
+  source    KnowledgeSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  type      JobType
+  status    JobStatus @default(QUEUED)
+  params    Json?
+
+  pagesDiscovered Int @default(0)
+  pagesProcessed  Int @default(0)
+  documentsCreated Int @default(0)
+  documentsUpdated Int @default(0)
+  documentsSkipped Int @default(0)
+  chunksIndexed    Int @default(0)
+  errorCount       Int @default(0)
+
+  log        Json?  // array of {level, message, url?, at}
+  error      String? @db.Text
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([status, createdAt])
+}
+
+// ─────────────────────────── Programs ──────────────────────────────────
+
+model ServiceCategory {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+  audience    String  @default("both") // job_seeker | employer | both
+  sortOrder   Int     @default(0)
+
+  programs Program[]
+}
+
+enum ProgramStatus {
+  ACTIVE
+  INACTIVE
+  UNKNOWN
+}
+
+/// A workforce service the agency offers. These are structured facts: the
+/// recommendation engine reads them directly rather than inferring them from
+/// vector similarity.
+model Program {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  shortDescription String @db.Text
+  description String? @db.Text
+  audience    String  @default("job_seeker") // job_seeker | employer | both
+  categoryId  String?
+  category    ServiceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  status      ProgramStatus @default(ACTIVE)
+  /// Canonical page a user should be sent to.
+  officialUrl String?
+  applyUrl    String?
+  contactPhone String?
+  contactEmail String?
+
+  /// How a user starts: what to actually do next.
+  nextSteps   String?  @db.Text
+  /// True when eligibility cannot be confirmed from published sources and a
+  /// staff conversation is required. Drives "verification required" wording.
+  requiresVerification Boolean @default(true)
+
+  keywords    String[] @default([])
+  lastVerifiedAt DateTime?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  serviceAreas ProgramServiceArea[]
+  rules        EligibilityRule[]
+  documents    ProgramDocument[]
+
+  @@index([status])
+  @@index([audience])
+}
+
+model ProgramServiceArea {
+  id        String  @id @default(cuid())
+  programId String
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  county    String
+  state     String  @default("CA")
+  notes     String?
+
+  @@unique([programId, county])
+  @@index([county])
+}
+
+enum RuleField {
+  COUNTY
+  EMPLOYMENT_STATUS
+  AGE
+  VETERAN_STATUS
+  INCOME_LEVEL
+  AUDIENCE
+  DISABILITY_STATUS
+  EDUCATION_LEVEL
+  OTHER
+}
+
+enum RuleOperator {
+  IN
+  NOT_IN
+  EQUALS
+  GTE
+  LTE
+  BETWEEN
+  EXISTS
+}
+
+/// Deterministic eligibility checks. `sourceUrl` is required in practice —
+/// a rule with no published source is treated as unverified and never used to
+/// assert that someone qualifies.
+model EligibilityRule {
+  id        String  @id @default(cuid())
+  programId String
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  field       RuleField
+  operator    RuleOperator
+  /// JSON value: string[] for IN/NOT_IN, number for GTE/LTE, [min,max] for BETWEEN.
+  value       Json
+  /// Plain-English version shown to users.
+  description String
+  /// A hard rule excludes the program outright when unmet; a soft rule only
+  /// lowers confidence and is surfaced as "may need to confirm".
+  hard        Boolean @default(true)
+  sourceUrl   String?
+  verified    Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([programId])
+}
+
+model ProgramDocument {
+  programId  String
+  documentId String
+  program    Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([programId, documentId])
+}
+
+// ─────────────────────────── Conversations ─────────────────────────────
+
+/// Anonymous by design. We store no name, email, or address — only the
+/// workforce facts a user volunteers that are needed to tailor answers.
+model ChatSession {
+  id           String   @id @default(cuid())
+  /// Random opaque token held by the browser; proves ownership of this session.
+  sessionToken String   @unique
+  /// Extracted profile: county, employmentStatus, audience, interests, etc.
+  profile      Json     @default("{}")
+  userAgentHash String?
+  ipHash       String?
+  startedAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+  /// Hard delete boundary for the retention job.
+  expiresAt    DateTime
+  closedAt     DateTime?
+
+  messages  ChatMessage[]
+  feedback  ChatFeedback[]
+  retrievals RetrievalLog[]
+
+  @@index([expiresAt])
+  @@index([lastActiveAt])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      MessageRole
+  content   String      @db.Text
+  /// Structured payload rendered by the UI: recommendations, citations,
+  /// follow-up suggestions, intent, and whether the answer was grounded.
+  payload   Json?
+  tokensIn  Int?
+  tokensOut Int?
+  latencyMs Int?
+  createdAt DateTime    @default(now())
+
+  feedback ChatFeedback[]
+
+  @@index([sessionId, createdAt])
+}
+
+enum FeedbackRating {
+  HELPFUL
+  NOT_HELPFUL
+}
+
+model ChatFeedback {
+  id        String         @id @default(cuid())
+  sessionId String
+  session   ChatSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messageId String?
+  message   ChatMessage?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  rating    FeedbackRating
+  comment   String?        @db.Text
+  reviewed  Boolean        @default(false)
+  createdAt DateTime       @default(now())
+
+  @@index([rating, createdAt])
+}
+
+/// What retrieval actually returned, for debugging and quality measurement.
+model RetrievalLog {
+  id        String   @id @default(cuid())
+  sessionId String?
+  session   ChatSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  messageId String?
+  query     String   @db.Text
+  rewrittenQuery String? @db.Text
+  intent    String?
+  filters   Json?
+  /// [{chunkId, documentId, title, url, score, rerankScore, used}]
+  results   Json
+  vectorMs  Int?
+  keywordMs Int?
+  rerankMs  Int?
+  totalMs   Int?
+  grounded  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ─────────────────────────── Referrals + config ────────────────────────
+
+model Referral {
+  id         String   @id @default(cuid())
+  sessionId  String?
+  programId  String?
+  /// Only what the user explicitly chose to send. Optional by design.
+  contactName String?
+  contactEmail String?
+  contactPhone String?
+  county     String?
+  notes      String?  @db.Text
+  status     String   @default("new")
+  createdAt  DateTime @default(now())
+
+  @@index([status, createdAt])
+}
+
+/// Runtime-tunable settings that override environment defaults. Secrets are
+/// never stored here — API keys stay in the environment.
+model SystemConfig {
+  key         String   @id
+  value       Json
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Reference conversations used to measure behavioural parity.
+model EvalCase {
+  id             String   @id @default(cuid())
+  name           String
+  /// Prior turns, if the case is a follow-up: [{role, content}]
+  history        Json     @default("[]")
+  question       String   @db.Text
+  expectedIntent String?
+  /// Program slugs that a good answer should surface.
+  expectedPrograms String[] @default([])
+  /// Substrings/URLs a good answer should cite.
+  expectedSources  String[] @default([])
+  /// Phrases that must NOT appear (fabrication guards).
+  forbiddenPhrases String[] @default([])
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  runs EvalRun[]
+}
+
+model EvalRun {
+  id        String   @id @default(cuid())
+  caseId    String
+  case      EvalCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  answer    String   @db.Text
+  intent    String?
+  programsFound String[] @default([])
+  sourcesFound  String[] @default([])
+  scores    Json
+  passed    Boolean  @default(false)
+  latencyMs Int?
+  createdAt DateTime @default(now())
+
+  @@index([caseId, createdAt])
+}
