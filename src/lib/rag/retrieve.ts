@@ -2,7 +2,7 @@ import { DocumentStatus } from '@prisma/client';
 import { prisma } from '../db';
 import { env } from '../env';
 import { logger } from '../logger';
-import { embedText } from '../ai/embeddings';
+import { embedQuery } from '../ai/embeddings';
 import { scrollByKeywords, searchVectors, type SearchFilters, type VectorHit } from '../vector/qdrant';
 import type { Intent, QueryAnalysis, RetrievedSource, UserProfile } from '@/types/chat';
 
@@ -67,7 +67,7 @@ export async function retrieve(
   const vectorResults = await Promise.all(
     queries.map(async (query) => {
       try {
-        const vector = await embedText(query);
+        const vector = await embedQuery(query);
         return await searchVectors(vector, topK, filters, env.RETRIEVAL_MIN_SCORE);
       } catch (err) {
         logger.warn('Vector search failed for a sub-query', {
@@ -98,15 +98,29 @@ export async function retrieve(
   // than excluding anything outright.
   const preferred = new Set(INTENT_CATEGORIES[analysis.intent] ?? []);
   const scored = fused.map((entry) => {
+    const payload = entry.hit.payload;
     let boost = 1;
-    if (entry.hit.payload.category && preferred.has(entry.hit.payload.category)) boost += 0.25;
-    if (profile.county && entry.hit.payload.counties?.includes(profile.county)) boost += 0.15;
+
+    // The chunk's own topic matters more than the page's, because a service
+    // hub page carries one category but answers several different questions.
+    if (payload.chunkCategory && preferred.has(payload.chunkCategory)) boost += 0.45;
+    else if (payload.category && preferred.has(payload.category)) boost += 0.2;
+
+    if (profile.county && payload.counties?.includes(profile.county)) boost += 0.15;
+
     // Prefer pages verified recently; stale material should lose ties.
-    const verified = entry.hit.payload.lastVerifiedAt;
+    const verified = payload.lastVerifiedAt;
     if (verified && Date.now() - new Date(verified).getTime() < 1000 * 60 * 60 * 24 * 60) boost += 0.08;
-    // Board minutes and agendas are rarely what a job seeker needs.
-    if (entry.hit.payload.category === 'policy' && analysis.intent !== 'general_info') boost -= 0.2;
-    return { ...entry, score: entry.score * boost };
+
+    // Hero and marketing copy ("Help is here.") sits close to almost any
+    // help-seeking question in embedding space while answering none of them.
+    if (payload.informative === false) boost -= 0.45;
+
+    // Board minutes, agendas and MOUs are rarely what a job seeker needs.
+    if (payload.chunkCategory === 'policy' && analysis.intent !== 'general_info') boost -= 0.25;
+    if (payload.documentType === 'PDF' && analysis.intent !== 'general_info') boost -= 0.1;
+
+    return { ...entry, score: entry.score * Math.max(0.1, boost) };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -132,9 +146,39 @@ export async function retrieve(
   };
 }
 
+/**
+ * Vocabulary each intent should match, used for query expansion.
+ *
+ * A conversational question ("can you help me learn a new skill?") shares few
+ * words with the page that answers it ("tuition assistance toward approved
+ * training"). Adding the intent's own vocabulary as a second query gives the
+ * dense retriever a target written in the corpus's language rather than the
+ * user's.
+ */
+const INTENT_EXPANSIONS: Record<Intent, string> = {
+  find_job: 'job openings employment listings apply for work hiring',
+  find_training: 'training courses classes certification credential skills tuition assistance',
+  financial_assistance: 'scholarship tuition assistance financial aid help paying for training',
+  career_counseling: 'career counseling advisor guidance career planning resume help',
+  internship: 'paid internship work experience earn while you learn',
+  eligibility: 'eligibility requirements who qualifies priority of service',
+  employer_hiring: 'employer recruit candidates post job openings screening',
+  employer_training: 'on-the-job training wage reimbursement employer incentive',
+  local_services: 'office location hours in person services county',
+  contact_referral: 'contact phone office hours address interest form',
+  general_info: 'services offered job seekers employers workforce programs',
+  off_topic: '',
+};
+
 function buildQueries(analysis: QueryAnalysis, profile: UserProfile): string[] {
   const queries = new Set<string>();
   queries.add(analysis.rewrittenQuery);
+
+  // Expansion query in the corpus's vocabulary, not the user's.
+  const expansion = INTENT_EXPANSIONS[analysis.intent];
+  if (expansion) {
+    queries.add([expansion, ...analysis.keywords].join(' '));
+  }
 
   if (analysis.isMultiPart) {
     for (const sub of analysis.subQuestions.slice(0, 3)) queries.add(sub);

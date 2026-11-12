@@ -1,4 +1,5 @@
 import { getEmbeddingClient } from './client';
+import { decorateQuery, localEmbed } from './local-embeddings';
 import { env } from '../env';
 import { withRetry } from '../errors';
 import { logger } from '../logger';
@@ -21,6 +22,13 @@ function supportsDimensionParam(model: string) {
 
 export async function embedTexts(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
+
+  if (env.EMBEDDING_PROVIDER === 'local') {
+    const vectors = await localEmbed(texts.map(normalizeInput));
+    assertDimensions(vectors, env.EMBEDDING_MODEL);
+    return vectors;
+  }
+
   const client = getEmbeddingClient();
   const model = env.EMBEDDING_MODEL;
   const out: number[][] = [];
@@ -40,16 +48,9 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
 
     // The API may return items out of order; `index` is authoritative.
     const ordered = [...response.data].sort((a, b) => a.index - b.index);
-    for (const item of ordered) {
-      if (item.embedding.length !== env.EMBEDDING_DIMENSIONS) {
-        throw new Error(
-          `Embedding dimension mismatch: model "${model}" returned ${item.embedding.length} ` +
-            `but EMBEDDING_DIMENSIONS is ${env.EMBEDDING_DIMENSIONS}. ` +
-            `Fix the env value and re-index, or the vector store will reject writes.`,
-        );
-      }
-      out.push(item.embedding);
-    }
+    const vectors = ordered.map((item) => item.embedding);
+    assertDimensions(vectors, model);
+    out.push(...vectors);
 
     logger.debug('Embedded batch', { from: i, size: batch.length, model });
   }
@@ -57,10 +58,35 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   return out;
 }
 
+/** Embeds a passage for indexing. */
 export async function embedText(text: string): Promise<number[]> {
   const [vector] = await embedTexts([text]);
   if (!vector) throw new Error('Embedding provider returned no vector');
   return vector;
+}
+
+/**
+ * Embeds a search query. Asymmetric models (the BGE family) expect an
+ * instruction prefix on queries but not on passages; omitting it measurably
+ * costs recall, so query embedding is a distinct call rather than a flag.
+ */
+export async function embedQuery(text: string): Promise<number[]> {
+  const [vector] = await embedTexts([decorateQuery(text)]);
+  if (!vector) throw new Error('Embedding provider returned no vector');
+  return vector;
+}
+
+/** A silent dimension mismatch would corrupt the collection, so fail loudly. */
+function assertDimensions(vectors: number[][], model: string): void {
+  for (const vector of vectors) {
+    if (vector.length !== env.EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Embedding dimension mismatch: model "${model}" returned ${vector.length} ` +
+          `but EMBEDDING_DIMENSIONS is ${env.EMBEDDING_DIMENSIONS}. ` +
+          `Fix the env value and re-index, or the vector store will reject writes.`,
+      );
+    }
+  }
 }
 
 /** Empty strings are rejected by most providers; collapse whitespace too. */

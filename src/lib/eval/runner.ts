@@ -160,11 +160,14 @@ export async function runCase(evalCase: {
   }
 
   // ── Actionability ──
-  const actionable = /\b(call|contact|visit|submit|browse|check|register|apply|reach|speak|start)\b/i.test(
-    answer,
-  )
+  // Not applicable to an off-topic redirect: there is no workforce next step
+  // to offer, and padding one in would make the answer worse.
+  const expectsAction = result.analysis.intent !== 'off_topic';
+  const actionable = !expectsAction
     ? 1
-    : 0;
+    : /\b(call|contact|visit|submit|browse|check|register|apply|reach|speak|start)\b/i.test(answer)
+      ? 1
+      : 0;
   if (actionable === 0) failures.push('no actionable next step');
 
   // ── Length ──

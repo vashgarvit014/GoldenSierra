@@ -1,4 +1,4 @@
-import type { Citation, ConflictNote, RetrievedSource } from '@/types/chat';
+import type { Citation, ConflictNote, Recommendation, RetrievedSource } from '@/types/chat';
 import { FORBIDDEN_CLAIMS } from '../ai/prompts';
 
 /**
@@ -232,10 +232,31 @@ export type GroundingReport = {
  * or URL that appears nowhere in the evidence, or an answer with no evidence
  * behind it at all.
  */
-export function checkGrounding(answer: string, sources: RetrievedSource[]): GroundingReport {
+export function checkGrounding(
+  answer: string,
+  sources: RetrievedSource[],
+  /**
+   * Verified program records also shown to the model. Without these the check
+   * flags the agency's own published phone number as a fabrication whenever it
+   * reached the model through a Program row rather than a retrieved passage —
+   * marking a correct answer as ungrounded, which is worse than not checking.
+   */
+  programs: Recommendation[] = [],
+): GroundingReport {
   const issues: string[] = [];
   const unsupportedClaims: string[] = [];
-  const evidence = sources.map((s) => `${s.title} ${s.snippet}`).join('\n').toLowerCase();
+
+  const programEvidence = programs
+    .map((p) =>
+      [p.name, p.shortDescription, p.nextSteps, p.officialUrl, p.contactPhone]
+        .filter(Boolean)
+        .join(' '),
+    )
+    .join('\n');
+
+  const evidence = [...sources.map((s) => `${s.title} ${s.snippet}`), programEvidence]
+    .join('\n')
+    .toLowerCase();
 
   const lower = answer.toLowerCase();
   for (const phrase of FORBIDDEN_CLAIMS) {
@@ -263,7 +284,9 @@ export function checkGrounding(answer: string, sources: RetrievedSource[]): Grou
 
   for (const url of answer.match(/https?:\/\/[^\s)<>\]]+/g) ?? []) {
     const cleaned = url.replace(/[.,;)]+$/, '').toLowerCase();
-    const inSources = sources.some((s) => s.url && cleaned.startsWith(s.url.toLowerCase().slice(0, 40)));
+    const inSources =
+      sources.some((s) => s.url && cleaned.startsWith(s.url.toLowerCase().slice(0, 40))) ||
+      programs.some((p) => p.officialUrl && cleaned.startsWith(p.officialUrl.toLowerCase().slice(0, 40)));
     if (!inSources && !evidence.includes(cleaned) && !cleaned.includes('goldensierra.com')) {
       issues.push(`Link not present in any source: ${cleaned}`);
       unsupportedClaims.push(cleaned);

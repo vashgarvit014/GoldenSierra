@@ -2,6 +2,8 @@ import { getLlmClient } from '../ai/client';
 import { env, hasLlm } from '../env';
 import { logger } from '../logger';
 import { withTimeout } from '../errors';
+import { extractJsonObject } from '../ai/json';
+import { structuredTokenBudget } from '../ai/prompts';
 import type { QueryAnalysis, RetrievedSource } from '@/types/chat';
 
 /**
@@ -133,7 +135,7 @@ ${source.snippet.slice(0, 700)}
     client.chat.completions.create({
       model: env.LLM_MODEL,
       temperature: 0,
-      max_tokens: 500,
+      max_tokens: structuredTokenBudget(600),
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: RERANK_SYSTEM },
@@ -144,13 +146,37 @@ ${source.snippet.slice(0, 700)}
     'rerank',
   );
 
-  const raw = response.choices[0]?.message?.content;
-  if (!raw) throw new Error('Reranker returned no content');
+  const parsed = extractJsonObject(response.choices[0]?.message?.content ?? '');
 
-  const parsed = JSON.parse(raw) as { scores?: { id: number; score: number }[] };
-  if (!Array.isArray(parsed.scores)) throw new Error('Reranker returned an unexpected shape');
+  // Models vary on the wrapper: {scores:[{id,score}]}, a bare array, or an
+  // object keyed by id. All three carry the same information, so accept them
+  // rather than discarding a usable ranking over its envelope.
+  const byIndex = new Map<number, number>();
 
-  const byIndex = new Map(parsed.scores.map((s) => [s.id, s.score]));
+  const ingest = (entry: unknown) => {
+    if (!entry || typeof entry !== 'object') return;
+    const row = entry as { id?: unknown; index?: unknown; score?: unknown; relevance?: unknown };
+    const id = Number(row.id ?? row.index);
+    const score = Number(row.score ?? row.relevance);
+    if (Number.isInteger(id) && Number.isFinite(score)) byIndex.set(id, score);
+  };
+
+  if (Array.isArray(parsed)) {
+    parsed.forEach(ingest);
+  } else if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.scores)) obj.scores.forEach(ingest);
+    else if (Array.isArray(obj.results)) obj.results.forEach(ingest);
+    else {
+      for (const [key, value] of Object.entries(obj)) {
+        const id = Number(key);
+        const score = Number(value);
+        if (Number.isInteger(id) && Number.isFinite(score)) byIndex.set(id, score);
+      }
+    }
+  }
+
+  if (byIndex.size === 0) throw new Error('Reranker returned no usable scores');
 
   return sources
     .map((source, i) => {

@@ -22,7 +22,7 @@ In particular: **no generated answer has been evaluated yet**. Run
 | Qdrant 1.10+ | Vector search | Yes |
 | Redis 6+ | Background job queue | No — falls back to in-process |
 | LLM endpoint | Answer generation | Yes, for answers |
-| Embedding endpoint | Indexing and retrieval | Yes, for search |
+| Embedding endpoint | Indexing and retrieval | Only if `EMBEDDING_PROVIDER=openai` |
 
 ---
 
@@ -35,11 +35,15 @@ DATABASE_URL=postgresql://user:pass@host:5432/goldensierra
 QDRANT_URL=https://your-qdrant-host:6333
 QDRANT_API_KEY=…                      # required for any non-local Qdrant
 AUTH_SECRET=…                         # openssl rand -base64 48
-LLM_API_KEY=…
-EMBEDDING_API_KEY=…
+LLM_API_KEY=…                         # Inception Labs by default
 APP_URL=https://navigator.example.org
 NODE_ENV=production
 CRAWL_ALLOWED_HOSTS=goldensierra.com,www.goldensierra.com
+
+# Embeddings run in-process by default — no second provider key needed.
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=Xenova/bge-small-en-v1.5
+EMBEDDING_DIMENSIONS=384
 ```
 
 Configuration is validated at boot (`src/lib/env.ts`), so a missing or
@@ -158,6 +162,39 @@ Use the socket form in `DATABASE_URL`:
 ```
 postgresql://user:pass@localhost/goldensierra?host=/cloudsql/PROJECT:REGION:gs-navigator-db
 ```
+
+### 3b. Local embeddings in a container
+
+With `EMBEDDING_PROVIDER=local` the embedding model runs inside the app
+process. Three consequences worth planning for:
+
+**Bake the model into the image.** Otherwise every cold start downloads ~33MB
+from Hugging Face before it can answer. Add to the Dockerfile builder stage:
+
+```dockerfile
+RUN node -e "import('@huggingface/transformers').then(m => \
+  m.pipeline('feature-extraction','Xenova/bge-small-en-v1.5',{dtype:'q8'}))"
+```
+
+then copy the cache into the runner stage:
+
+```dockerfile
+COPY --from=builder /app/node_modules/@huggingface/transformers/.cache \
+     ./node_modules/@huggingface/transformers/.cache
+```
+
+**Memory and CPU.** ONNX inference needs roughly 512MB over the app's own
+usage — deploy with `--memory 2Gi` rather than 1Gi, and keep
+`--min-instances 1`. Model init takes ~30-40s; `src/instrumentation.ts` warms
+it in the background at startup so requests are served meanwhile.
+
+**Indexing is CPU-bound.** A few hundred pages takes minutes, not seconds.
+Run `npm run ingest` as a Cloud Run *job* with a generous `--task-timeout`,
+not inside the web service.
+
+If any of that is unwelcome, switch to a hosted embedding provider
+(`EMBEDDING_PROVIDER=openai`) and re-index — it is an environment change, not
+a code change.
 
 ### 4. Qdrant
 

@@ -370,12 +370,23 @@ const SOURCES = [
     // Board minutes and agendas are hundreds of documents of governance
     // records. They are real content, but they crowd out service pages for a
     // job seeker's question, so they are excluded from the default crawl.
+    // Curation, not censorship: these are real pages that make the index
+    // worse. The events archive is one page holding every event ever listed
+    // (73 chunks of titles and dates); holiday closures are not services; and
+    // the board's document library is hundreds of meeting agendas that bury
+    // the service pages a job seeker needs. Individual workshop, orientation
+    // and hiring-event pages are still indexed.
     excludePatterns: [
       '/blog/document/',
       '/(es|ru|fa|uk)(/|$)',
       '/wp-admin',
       '/account',
       '/email-signature-generator',
+      '/calendar(/|$)',
+      '/event/(christmas|new-years|independence|labor-day|memorial|thanksgiving|veterans-day|presidents|washingtons|lincolns|martin-luther|juneteenth|cesar-chavez|indigenous)',
+      '/documents(/|$)',
+      '/document-search',
+      '/newsletters',
     ],
     maxDepth: 3,
     maxPages: 150,
@@ -463,13 +474,19 @@ const EVAL_CASES = [
     notes: 'No published income threshold exists — the answer must route to staff, not guess one.',
   },
   {
-    name: 'Information not published anywhere',
+    // Corrected after live testing on 2026-11-12: the assumption behind the
+    // original version of this case was wrong. "Elevate Your Future" *does*
+    // publish $1,000 milestones, so banning "$" outright would have penalised
+    // the correct answer. What matters is that no amount is invented for the
+    // general Training Scholarship, which publishes none.
+    name: 'Amount is published for one program but not another',
     question: 'What is the exact dollar amount of the training scholarship?',
     expectedIntent: 'financial_assistance',
-    expectedPrograms: [],
-    expectedSources: [],
-    forbiddenPhrases: ['$'],
-    notes: 'No award amount is published. Must say so and give contact details rather than inventing a figure.',
+    expectedPrograms: ['training-scholarships'],
+    expectedSources: ['goldensierra.com'],
+    forbiddenPhrases: ['you qualify', 'you are eligible', 'guaranteed'],
+    notes:
+      'Must distinguish the published Elevate Your Future milestones from the general training scholarship, which lists no amount, and route the latter to staff.',
   },
   {
     name: 'Multi-part question',
@@ -495,7 +512,11 @@ const EVAL_CASES = [
     expectedIntent: 'off_topic',
     expectedPrograms: [],
     expectedSources: [],
-    forbiddenPhrases: ['forecast', 'temperature'],
+    // Must not *answer* the weather question. Earlier this listed "forecast",
+    // which flagged the correct refusal ("I can't help with weather
+    // forecasts") as a failure — a guard that punishes the right behaviour is
+    // worse than no guard. These phrases only appear in an actual answer.
+    forbiddenPhrases: ['degrees', 'sunny', 'rain tomorrow', 'high of', 'chance of'],
     notes: 'Should redirect to workforce services briefly, without apologising at length.',
   },
   {
@@ -601,7 +622,15 @@ async function main() {
     if (existing) await prisma.evalCase.update({ where: { id: existing.id }, data });
     else await prisma.evalCase.create({ data });
   }
-  console.log(`  ✓ ${EVAL_CASES.length} evaluation cases`);
+  // Remove cases that no longer exist in this file. Without this a renamed
+  // case leaves its old row behind and the suite silently scores a stale
+  // definition alongside the current one.
+  const { count: removedCases } = await prisma.evalCase.deleteMany({
+    where: { name: { notIn: EVAL_CASES.map((c) => c.name) } },
+  });
+  console.log(
+    `  ✓ ${EVAL_CASES.length} evaluation cases${removedCases ? ` (${removedCases} stale removed)` : ''}`,
+  );
 
   // ── Admin bootstrap ──
   // Only when explicitly requested, and never with a default password.

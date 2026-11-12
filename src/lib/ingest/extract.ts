@@ -62,6 +62,11 @@ const BOILERPLATE_SELECTORS = [
   '.sharedaddy',
   '#comments',
   '.comments-area',
+  // Related-content widgets: the same list on every page of a post type.
+  '.tribe-events-related-events',
+  '[class*="related-events"]',
+  '[class*="related-posts"]',
+  '[id*="related-events"]',
 ];
 
 /** Content roots in priority order; the first that yields real text wins. */

@@ -17,6 +17,23 @@ import { INTENT_LABELS } from '@/types/chat';
  * than being buried in prose, so tuning does not mean rewriting the prompt.
  */
 
+/**
+ * Reasoning models (mercury-3 among them) spend part of the `max_tokens`
+ * budget on internal reasoning before emitting any content. Observed on
+ * mercury-3: ~90-125 reasoning tokens even for a trivial structured call.
+ *
+ * A budget sized only for the visible output therefore returns
+ * `finish_reason: "length"` with empty or truncated content — which looks
+ * exactly like a model that cannot follow the schema. Every structured call
+ * adds this headroom so the failure mode cannot recur silently.
+ */
+export const REASONING_HEADROOM_TOKENS = 600;
+
+/** Budget for a structured call that should emit roughly `output` tokens. */
+export function structuredTokenBudget(output: number): number {
+  return output + REASONING_HEADROOM_TOKENS;
+}
+
 export const RESPONSE_STYLE = {
   /** Soft ceiling. The model is told to go shorter when the question is small. */
   maxWords: 280,

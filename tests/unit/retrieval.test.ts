@@ -17,6 +17,8 @@ function hit(chunkId: string, overrides: Partial<VectorHit['payload']> = {}): Ve
       content: 'Some content about workforce services.',
       headingPath: null,
       category: 'general',
+      chunkCategory: 'general',
+      informative: true,
       audience: 'both',
       programName: null,
       counties: [],

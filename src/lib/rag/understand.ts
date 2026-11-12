@@ -3,7 +3,9 @@ import { getLlmClient } from '../ai/client';
 import { env, hasLlm } from '../env';
 import { logger } from '../logger';
 import { withTimeout } from '../errors';
-import { INTENTS, type Intent, type QueryAnalysis, type UserProfile } from '@/types/chat';
+import { parseModelJson } from '../ai/json';
+import { structuredTokenBudget } from '../ai/prompts';
+import { INTENTS, type CountyName, type Intent, type QueryAnalysis, type UserProfile } from '@/types/chat';
 
 /**
  * Query understanding.
@@ -222,14 +224,27 @@ function splitQuestions(text: string): string[] {
 
 // ─────────────────────────── LLM refinement ───────────────────────────
 
+/**
+ * Deliberately lenient. Only `intent` is required — everything else falls back
+ * to the deterministic baseline. A model that omits `confidence` has still
+ * told us something useful, and discarding the whole response over one missing
+ * field silently disables LLM refinement entirely.
+ */
 const AnalysisSchema = z.object({
   intent: z.enum(INTENTS),
-  confidence: z.number().min(0).max(1),
-  rewritten_query: z.string().min(1).max(500),
-  keywords: z.array(z.string()).max(10).default([]),
+  confidence: z.coerce.number().min(0).max(1).optional(),
+  rewritten_query: z.string().min(1).max(500).optional(),
+  keywords: z.array(z.string()).max(10).optional().default([]),
   profile: z
     .object({
-      county: z.enum(['Placer', 'El Dorado', 'Alpine']).nullish(),
+      // Normalised rather than enum-matched: models return "Placer County",
+      // "el dorado", "El Dorado County". Rejecting the entire analysis over a
+      // suffix would be a formatting failure masquerading as a model failure.
+      county: z
+        .string()
+        .nullish()
+        .transform((v) => normalizeCounty(v))
+        .optional(),
       employment_status: z
         .enum(['unemployed', 'employed', 'underemployed', 'laid_off', 'student', 'unknown'])
         .nullish(),
@@ -241,8 +256,18 @@ const AnalysisSchema = z.object({
     })
     .default({}),
   missing_info: z.string().max(200).nullish(),
-  sub_questions: z.array(z.string()).max(4).default([]),
+  sub_questions: z.array(z.string()).max(4).optional().default([]),
 });
+
+/** Maps any reasonable spelling of a served county onto its canonical name. */
+export function normalizeCounty(value: string | null | undefined): CountyName | null {
+  if (!value) return null;
+  const cleaned = value.toLowerCase().replace(/\s+county\b/g, '').trim();
+  if (/^placer$/.test(cleaned)) return 'Placer';
+  if (/^el\s*dorado$/.test(cleaned)) return 'El Dorado';
+  if (/^alpine$/.test(cleaned)) return 'Alpine';
+  return null;
+}
 
 const ANALYSIS_SYSTEM = `You analyse messages sent to a workforce-services assistant for Golden Sierra Job Training Agency (Placer, El Dorado and Alpine counties, California).
 
@@ -279,7 +304,7 @@ export async function analyzeQuery(
       client.chat.completions.create({
         model: env.LLM_MODEL,
         temperature: 0,
-        max_tokens: 500,
+        max_tokens: structuredTokenBudget(500),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: ANALYSIS_SYSTEM },
@@ -296,18 +321,23 @@ export async function analyzeQuery(
       'query analysis',
     );
 
-    const raw = response.choices[0]?.message?.content;
-    if (!raw) return baseline;
+    const data = parseModelJson(
+      response.choices[0]?.message?.content,
+      (value) => {
+        const result = AnalysisSchema.safeParse(value);
+        return result.success
+          ? ({ success: true, data: result.data } as const)
+          : ({
+              success: false,
+              issues: result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+            } as const);
+      },
+      'Query analysis',
+    );
 
-    const parsed = AnalysisSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
-      logger.warn('Query analysis failed schema validation; using rule-based result', {
-        issues: parsed.error.issues.slice(0, 3),
-      });
-      return baseline;
-    }
-
-    const data = parsed.data;
+    // Partial or unusable output falls back to the deterministic result
+    // rather than degrading the answer.
+    if (!data) return baseline;
     const profileUpdates: UserProfile = { ...baseline.profileUpdates };
     if (data.profile.county) profileUpdates.county = data.profile.county;
     if (data.profile.employment_status && data.profile.employment_status !== 'unknown') {
@@ -328,12 +358,12 @@ export async function analyzeQuery(
 
     return {
       intent: data.intent,
-      confidence: data.confidence,
-      rewrittenQuery: data.rewritten_query || baseline.rewrittenQuery,
+      confidence: data.confidence ?? baseline.confidence,
+      rewrittenQuery: data.rewritten_query?.trim() || baseline.rewrittenQuery,
       keywords: [...new Set([...data.keywords, ...baseline.keywords])].slice(0, 10),
       profileUpdates,
       missingInfo: redundant ? null : missing,
-      isMultiPart: data.sub_questions.length > 1,
+      isMultiPart: data.sub_questions.length > 1 || baseline.isMultiPart,
       subQuestions: data.sub_questions.length > 1 ? data.sub_questions : baseline.subQuestions,
     };
   } catch (err) {

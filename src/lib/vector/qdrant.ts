@@ -18,7 +18,18 @@ export type VectorPayload = {
   url: string | null;
   content: string;
   headingPath: string | null;
+  /** Document-level classification. */
   category: string | null;
+  /**
+   * Classification of this chunk alone, from its heading and text. A service
+   * hub page is one document with one category, but its sections answer
+   * different questions — the "Apply for a Scholarship" section of a page
+   * categorised `job_search` is the best answer to a funding question. Ranking
+   * on the document category alone systematically buries it.
+   */
+  chunkCategory: string | null;
+  /** Rough information density; used to down-rank hero/marketing copy. */
+  informative: boolean;
   audience: string | null;
   programName: string | null;
   counties: string[];

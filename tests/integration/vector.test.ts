@@ -53,6 +53,8 @@ function payload(overrides: Partial<VectorPayload> & { chunkId: string }): Vecto
     content: 'Training scholarships and tuition assistance for approved programs.',
     headingPath: null,
     category: 'financial_assistance',
+    chunkCategory: 'financial_assistance',
+    informative: true,
     audience: 'job_seeker',
     programName: null,
     counties: ['Placer'],

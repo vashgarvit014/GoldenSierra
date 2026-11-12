@@ -52,15 +52,18 @@ const schema = z.object({
   LLM_BASE_URL: z.string().default('https://api.openai.com/v1'),
   LLM_MODEL: z.string().default('gpt-4o-mini'),
   LLM_TEMPERATURE: num(0.2),
-  LLM_MAX_TOKENS: int(1200),
+  LLM_MAX_TOKENS: int(2000),
 
+  // 'local' runs the model in-process via Transformers.js (no API key).
+  // Anything else is treated as an OpenAI-compatible HTTP endpoint.
+  EMBEDDING_PROVIDER: z.enum(['local', 'openai']).default('openai'),
   EMBEDDING_API_KEY: z.string().optional(),
   EMBEDDING_BASE_URL: z.string().default('https://api.openai.com/v1'),
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   EMBEDDING_DIMENSIONS: int(1536),
   EMBEDDING_BATCH_SIZE: int(64),
 
-  RETRIEVAL_TOP_K: int(24),
+  RETRIEVAL_TOP_K: int(40),
   RETRIEVAL_FINAL_K: int(8),
   RETRIEVAL_MIN_SCORE: num(0.25),
   RERANK_ENABLED: bool(true),
@@ -104,7 +107,9 @@ export type Env = typeof env;
 /** The LLM needs a key; the app should still boot without one so the admin
  *  dashboard and ingestion tooling remain usable. Callers check this. */
 export const hasLlm = () => Boolean(env.LLM_API_KEY);
-export const hasEmbeddings = () => Boolean(env.EMBEDDING_API_KEY || env.LLM_API_KEY);
+/** Local embeddings need no credential, so availability depends on provider. */
+export const hasEmbeddings = () =>
+  env.EMBEDDING_PROVIDER === 'local' || Boolean(env.EMBEDDING_API_KEY || env.LLM_API_KEY);
 export const hasRedis = () => Boolean(env.REDIS_URL);
 
 export function requireAuthSecret(): Uint8Array {

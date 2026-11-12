@@ -16,6 +16,7 @@ import {
   contentHash,
   detectAudience,
   detectCategory,
+  isInformative,
   detectCounties,
   detectLanguage,
   detectProgramName,
@@ -253,6 +254,14 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
       content: chunk.content,
       headingPath: chunk.headingPath,
       category: document.category,
+      // Recomputed per chunk so a section is ranked on what it actually says,
+      // not on whatever the page as a whole was labelled.
+      chunkCategory: detectCategory(
+        document.url,
+        chunk.headingPath ?? document.title,
+        chunk.content,
+      ),
+      informative: isInformative(chunk.content),
       audience: document.audience,
       programName: document.programName,
       counties: document.counties,

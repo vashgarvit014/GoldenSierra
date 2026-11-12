@@ -175,6 +175,18 @@ const CATEGORY_RULES: { category: Category; url?: RegExp; keywords: RegExp; weig
   },
 ];
 
+/**
+ * Governance paperwork: memoranda, agreements, minutes, agendas, bylaws.
+ *
+ * These are real agency documents but they are written in the vocabulary of
+ * the services they fund, so keyword scoring reliably mislabels them — a
+ * 2023 MOU was categorised `training` purely for saying "training" 80 times,
+ * which put a 109-chunk contract ahead of the job seeker page. Identify them
+ * by what they are, before any topical scoring runs.
+ */
+const GOVERNANCE_TITLE =
+  /\b(mou|memorandum of understanding|agreement|minutes|agenda|bylaws?|resolution|rfp|request for proposal|local plan|regional plan|budget|audit|policy manual|attachment)\b/i;
+
 /** Pages that describe the organisation rather than a specific service. */
 const GENERAL_PATHS = /\/about$|\/about\/|\/sitemap|\/careers|^https?:\/\/[^/]+\/?$/;
 
@@ -191,6 +203,7 @@ const HUB_PATHS: [RegExp, Category][] = [
 
 export function detectCategory(url: string | null, title: string, text: string): Category {
   const path = (url ?? '').toLowerCase();
+  if (GOVERNANCE_TITLE.test(title)) return 'policy';
   if (GENERAL_PATHS.test(path)) return 'general';
   for (const [pattern, category] of HUB_PATHS) if (pattern.test(path)) return category;
   const haystack = `${title}\n${text.slice(0, 6000)}`;
@@ -253,6 +266,46 @@ function count(haystack: string, pattern: RegExp): number {
   const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
   const matches = haystack.match(new RegExp(pattern.source, flags));
   return matches?.length ?? 0;
+}
+
+/**
+ * Distinguishes substantive content from hero and marketing copy.
+ *
+ * Short, generic lines ("Help is here.", "We work for you.") embed close to
+ * almost any help-seeking question while carrying no answer, so without this
+ * they crowd out the specific passages that actually help someone.
+ */
+export function isInformative(text: string): boolean {
+  const words = wordCount(text);
+  if (words < 25) return false;
+  if (isListing(text)) return false;
+
+  // Content that answers something tends to carry concrete nouns, figures,
+  // or service vocabulary rather than only encouragement.
+  const concrete =
+    /\b(eligib|apply|applica|requirement|county|training|scholarship|internship|wage|reimburse|contact|phone|hours|program|service|workshop|resume|employer|veteran|\$|\d{3}[-.)]\s?\d{3})/i.test(
+      text,
+    );
+  return concrete || words >= 60;
+}
+
+/**
+ * Detects listing/index chunks — a calendar grid, a search-results page, a
+ * document library. They are mostly titles and dates with little prose, and
+ * because they mention many topics at once they match almost any query while
+ * answering none of them.
+ */
+export function isListing(text: string): boolean {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 5) return false;
+
+  const shortLines = lines.filter((l) => wordCount(l) <= 8).length;
+  const dateLines = lines.filter((l) =>
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b\d{1,2}:\d{2}\s?(am|pm)\b/i.test(l),
+  ).length;
+
+  // Mostly fragments, or peppered with dates: a schedule, not an explanation.
+  return shortLines / lines.length > 0.6 || dateLines >= 4;
 }
 
 /** Pages too thin to be worth an embedding (empty templates, redirect stubs). */

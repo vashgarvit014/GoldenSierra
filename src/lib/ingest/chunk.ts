@@ -33,6 +33,25 @@ export type ChunkOptions = {
 
 type Section = { headingPath: string[]; lines: string[] };
 
+/**
+ * Section headings that mark cross-page widgets rather than page content.
+ *
+ * A WordPress events theme repeats a "Related Events" list on every event
+ * page, so one widget becomes a dozen near-identical chunks that mention many
+ * topics and answer none — they outranked the actual service pages before
+ * this filter existed. Dropping them at the section level is more robust than
+ * CSS selectors, which change with the theme.
+ */
+const BOILERPLATE_HEADINGS =
+  /^(related|more|other|upcoming|recent|similar|you might|you may)\s+(events?|posts?|articles?|stories|like)|^(share|follow|subscribe|newsletter|categories|tags|archives?|navigation|breadcrumb|search results?)\b/i;
+
+function isBoilerplateSection(headingPath: string[]): boolean {
+  // Any segment, not just the deepest: these widgets nest their own headings
+  // ("Job One: Networking > Related Events > Career Pathways"), so testing
+  // only the last segment misses the entire subtree beneath the widget.
+  return headingPath.some((segment) => BOILERPLATE_HEADINGS.test(segment.trim()));
+}
+
 /** Parses "## Heading" markers produced by the extractor into a section tree. */
 function splitIntoSections(text: string): Section[] {
   const sections: Section[] = [];
@@ -110,6 +129,8 @@ export async function chunkDocument(text: string, options: ChunkOptions = {}): P
   for (const section of sections) {
     const body = section.lines.join('\n').trim();
     if (!body) continue;
+    // A widget repeated across pages is navigation, not an answer.
+    if (isBoilerplateSection(section.headingPath)) continue;
 
     if (pending) {
       const merged = `${pending.body}\n\n${body}`.trim();

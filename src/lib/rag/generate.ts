@@ -2,6 +2,7 @@ import { getLlmClient } from '../ai/client';
 import { env, hasLlm } from '../env';
 import { logger } from '../logger';
 import { withTimeout } from '../errors';
+import { extractJsonObject } from '../ai/json';
 import {
   FALLBACK_FOLLOW_UPS,
   FOLLOW_UP_SYSTEM,
@@ -9,6 +10,7 @@ import {
   OFF_TOPIC_INSTRUCTION,
   RESPONSE_STYLE,
   SYSTEM_PROMPT,
+  structuredTokenBudget,
   buildContextBlock,
   buildProfileBlock,
   buildProgramBlock,
@@ -253,7 +255,11 @@ export async function generateAnswer(input: GenerateInput): Promise<GenerateResu
 export function finalizeAnswer(raw: string, prepared: PreparedTurn) {
   const softened = softenOverclaims(raw);
   const { answer, citations } = reconcileCitations(softened, prepared.usedSources);
-  const grounding = checkGrounding(answer, prepared.usedSources);
+  const grounding = checkGrounding(
+    answer,
+    prepared.usedSources,
+    prepared.payloadBase.recommendations,
+  );
 
   if (!grounding.grounded) {
     logger.warn('Answer failed grounding checks', {
@@ -321,7 +327,7 @@ export async function generateFollowUps(
       client.chat.completions.create({
         model: env.LLM_MODEL,
         temperature: 0.4,
-        max_tokens: 160,
+        max_tokens: structuredTokenBudget(200),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: FOLLOW_UP_SYSTEM },
@@ -335,13 +341,18 @@ export async function generateFollowUps(
       'follow-up generation',
     );
 
-    const raw = response.choices[0]?.message?.content;
-    if (!raw) return fallback;
+    const parsed = extractJsonObject(response.choices[0]?.message?.content ?? '') as {
+      suggestions?: unknown;
+    } | null;
+    // Some models return a bare array, others wrap it. Accept either.
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.suggestions)
+        ? parsed.suggestions
+        : null;
+    if (!list) return fallback;
 
-    const parsed = JSON.parse(raw) as { suggestions?: unknown };
-    if (!Array.isArray(parsed.suggestions)) return fallback;
-
-    const suggestions = parsed.suggestions
+    const suggestions = list
       .filter((s): s is string => typeof s === 'string')
       .map((s) => s.trim())
       .filter((s) => s.length > 4 && s.length < 80)

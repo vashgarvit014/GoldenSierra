@@ -33,11 +33,9 @@ Consequently:
   establish parity, load real reference transcripts as `EvalCase` rows and tune
   against them with `npm run eval`. See [docs/BEHAVIOR-SPEC.md](docs/BEHAVIOR-SPEC.md).
 
-**No model-generated answers have been tested**, because no LLM or embedding
-API key was available in the build environment. Everything that does not
-require a provider key *was* exercised against live services — the real
-goldensierra.com crawl, real PostgreSQL, real Qdrant. Exactly what was verified
-and what was not is listed in
+Everything was exercised against live services — the real goldensierra.com
+crawl, real PostgreSQL, real Qdrant, and real `mercury-3` generation. What was
+verified and what was not is listed in
 [docs/VERIFICATION.md](docs/VERIFICATION.md). Please read it before deploying.
 
 ---
@@ -79,7 +77,7 @@ Answer + recommendations + citations + next steps + follow-ups
 
 ## Quick start
 
-**Prerequisites:** Node 20+, Docker, and an OpenAI-compatible API key.
+**Prerequisites:** Node 20+, Docker, and a chat-model API key.
 
 ```bash
 # 1. Install
@@ -91,9 +89,11 @@ docker compose up -d
 # 3. Configure
 cp .env.example .env
 # Required in .env:
-#   AUTH_SECRET      — openssl rand -base64 48
-#   LLM_API_KEY      — OpenAI, OpenRouter, or any compatible provider
-#   EMBEDDING_API_KEY
+#   AUTH_SECRET — openssl rand -base64 48
+#   LLM_API_KEY — your chat provider key
+#
+# Defaults are set for Inception Labs (mercury-3) with embeddings running
+# locally, so no second provider key is needed. See "Models" below.
 
 # 4. Create the schema and seed programs, categories and eval cases
 npm run db:migrate
@@ -137,21 +137,49 @@ All configuration is environment-driven and validated at boot
 (`src/lib/env.ts`); a misconfigured deployment fails immediately rather than
 mid-conversation. See [`.env.example`](.env.example) for the full annotated list.
 
-### Swapping models
+### Models
 
-Both the chat and embedding models speak the OpenAI protocol, so switching
-provider is a change of base URL and model name — no code change.
+**Chat — Inception Labs `mercury-3`** (default). A diffusion LLM with a 1M
+context window, JSON mode and structured outputs. Being diffusion-based it
+streams in a few large blocks rather than token-by-token — the UI handles
+this, but the typing effect is steppy. It is also a reasoning model, so
+reasoning tokens are charged against `max_tokens`; every structured call adds
+`REASONING_HEADROOM_TOKENS` on top of its expected output.
+
+Reached over the standard OpenAI protocol, so switching provider is a
+base-URL and model-name change with no code change:
 
 ```bash
+# OpenAI
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+
 # OpenRouter
 LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_MODEL=anthropic/claude-sonnet-4.5
-
-# Self-hosted BGE-M3 behind a TEI/vLLM server
-EMBEDDING_BASE_URL=http://localhost:8080/v1
-EMBEDDING_MODEL=BAAI/bge-m3
-EMBEDDING_DIMENSIONS=1024
 ```
+
+**Embeddings — local BGE** (default). Inception Labs serves only
+`chat.completions` and has **no embeddings endpoint**, which RAG requires. So
+rather than depend on a second paid provider to vectorise a few hundred pages,
+`EMBEDDING_PROVIDER=local` runs `Xenova/bge-small-en-v1.5` in-process via
+Transformers.js — 384 dimensions, ~33MB, no API key, no per-query cost.
+
+The model is warmed at server start (`src/instrumentation.ts`) because a cold
+load takes ~30–40s; warm, a query embeds in single-digit milliseconds.
+
+To use a hosted embedding provider instead:
+
+```bash
+EMBEDDING_PROVIDER=openai
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_API_KEY=…
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+```
+
+BGE models are asymmetric — queries carry an instruction prefix, passages do
+not. `embedQuery()` applies it automatically; skipping it costs real recall.
 
 > **Changing the embedding model requires a re-index.** Vector dimensions must
 > match the collection; startup refuses to proceed on a mismatch rather than
@@ -196,7 +224,7 @@ Background jobs run through BullMQ when `REDIS_URL` is set
 ## Testing
 
 ```bash
-npm test          # 109 unit tests + 8 Qdrant integration tests
+npm test          # 117 tests: 109 unit + 8 against live Qdrant
 npm run typecheck
 npm run eval      # reference evaluation suite (needs an LLM key + indexed data)
 ```
@@ -211,6 +239,11 @@ relevance, source accuracy, grounding, fabrication guards, actionability,
 length, consolidation) and prints a **baseline** — not a pass/fail against
 invented thresholds. Set CI thresholds from numbers you have actually observed.
 Fabrication failures alone exit non-zero.
+
+The observed baseline on this corpus is recorded in
+[docs/VERIFICATION.md](docs/VERIFICATION.md). Two of the original eval cases
+turned out to be wrong rather than the system — worth reading before trusting
+any score.
 
 ---
 
