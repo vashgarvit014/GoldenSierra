@@ -1,0 +1,32 @@
+{
+  "browser": "157.0.8103.78",
+  "findings": [
+    {
+      "q": "I am unemployed and looking for caregiver work. What job openings are in the knowledge base?",
+      "pdf": 3,
+      "total": 8,
+      "intent": "find_job",
+      "titles": "Help for Job Seekers, Home, Job One: Resumes & Cover Letters, Scrapedata, Weekly Job Openings",
+      "ok": true,
+      "answer": "Yes — the knowledge base has one caregiver opening right now. Golden Years In-Home Senior Care is hiring companion care specialists for non-medical, in-home senior care in Placer County (Roseville, Rocklin, Lincoln, Auburn, and surrounding areas) 12. You'd help with companionship, meals, light housekeeping, personal care (bathing, dressing, grooming), errands, and activities 2. Shifts are flexible"
+    },
+    {
+      "q": "What caregiver jobs are available in Placer County and what do they pay?",
+      "pdf": 4,
+      "total": 6,
+      "intent": "find_job",
+      "titles": "Home, QA-Test-Workforce-Data, Scrapedata, Weekly Job Openings",
+      "ok": true,
+      "answer": "There is one caregiver opening in Placer County in the knowledge base: Golden Years In-Home Senior Care is hiring Companion Care Specialists for non-medical, in-home senior care across the county — Roseville, Rocklin, Lincoln, Auburn, and the surrounding areas 12. Duties include companionship, meals, light housekeeping, personal care (bathing, dressing, grooming), errands, and activities 2. Shifts"
+    },
+    {
+      "q": "I am looking for work. What salary does Zarnexa Eldercare Collective offer?",
+      "pdf": 4,
+      "total": 8,
+      "intent": "find_job",
+      "titles": "Help for Job Seekers, Home, QA-Test-Workforce-Data, Scrapedata, Weekly Job Openings",
+      "ok": true,
+      "answer": "I have to be blunt with you: I cannot share that salary, because the Zarnexa Eldercare listing is not a real job. It's fabricated test data in the system, not an official Golden Sierra posting. I won't give you invented pay figures or a fake application process, as that could mislead you. What I can do is connect you with verified local help. As an unemployed job seeker living in Placer County, yo"
+    }
+  ]
+}

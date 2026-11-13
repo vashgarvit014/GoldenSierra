@@ -8,7 +8,39 @@ nothing overwritten, no application logic changed.
 
 ---
 
-## Verdict: ⚠️ PARTIAL PASS
+## Verdict: ✅ PASS (after fix applied 13 Nov 2026)
+
+> **Update — the blocking defect is fixed and re-verified in real Google
+> Chrome.** Both documents were patched to `audience: both`,
+> `category: job_search` with `reindex: true`, and the audience filter no
+> longer excludes them. Re-tested headed in **Chrome 157.0.8103.78**:
+> **3 of 3** job-seeker questions now retrieve the uploaded PDFs, confirmed
+> against `RetrievalLog`.
+>
+> | Question (asked as a job seeker) | PDF chunks retrieved | Before |
+> |---|---|---|
+> | "I am unemployed and looking for caregiver work…" | **3 of 8** | 0 |
+> | "What caregiver jobs are available in Placer County and what do they pay?" | **4 of 6** | 0 |
+> | "I am looking for work. What salary does Zarnexa… offer?" | **4 of 8** | 0 |
+>
+> Post-fix state — PostgreSQL and Qdrant both updated, 389 chunks ≡ 389 points:
+>
+> | Document | audience | category |
+> |---|---|---|
+> | `Scrapedata` | `both` | `job_search` |
+> | `QA-Test-Workforce-Data` | `both` | `job_search` |
+>
+> Answer quality held up: asked for the Zarnexa salary, the assistant replied
+> *"I cannot share that salary, because the Zarnexa Eldercare listing is not a
+> real job. It's fabricated test data."* It retrieved the chunk and still
+> refused to present synthetic data as a real opening.
+>
+> The original PARTIAL PASS assessment, and the evidence behind it, is kept
+> below unchanged.
+
+---
+
+## Original verdict: ⚠️ PARTIAL PASS
 
 Upload, extraction, chunking, embedding, PostgreSQL persistence, Qdrant
 indexing and live retrieval **all work**, with no restart and no manual
@@ -172,9 +204,17 @@ re-crawling is documented but not wired up in this environment.
 
 ## E. Issues Found
 
-### Issue 1 — 🔴 BLOCKING: uploaded job listings are invisible to job seekers
+### Issue 1 — ✅ FIXED 13 Nov 2026 (was 🔴 BLOCKING)
 
-**Severity:** High — the document is unreachable by its intended audience.
+**Severity:** High — the document was unreachable by its intended audience.
+
+**Resolution:** both documents patched via
+`PATCH /api/admin/documents/<id>` with
+`{"audience":"both","category":"job_search","reindex":true}` — 43 and 3 chunks
+re-indexed respectively. Verified headed in Chrome 157: 3/3 job-seeker
+questions now retrieve the PDFs. The *underlying classifier* still labels
+job-listing PDFs `employer` on upload, so the durable fixes below remain
+worth doing.
 
 **Reproduce:**
 1. Upload a PDF of job listings (columns such as "Employer / Company").
@@ -245,19 +285,25 @@ operations.
 |---|---|---|
 | Main walkthrough video | `test-artifacts/golden-sierra-rag-live-testing.webm` | ✅ 8.6 MB, VP9, 1440×900, 25 fps, **1 min 16 s** |
 | Fresh-session video | `test-artifacts/golden-sierra-rag-persistence.webm` | ✅ 1.3 MB |
-| MP4 copy | — | ❌ **Not produced** — see below |
+| Chrome verification video | `test-artifacts/golden-sierra-chrome-fix-verified.webm` / `.mp4` | ✅ 74 s, real Chrome 157, headed |
+| Audience-fix video | `test-artifacts/golden-sierra-audience-fix.webm` / `.mp4` | ✅ 61 s, before → fix → after |
+| MP4 copies | `test-artifacts/*.mp4` | ✅ produced (ffmpeg 9.0.2 installed) |
 | Screenshots | `test-artifacts/0*.png` | ✅ 9 stills |
 | Walkthrough results | `test-artifacts/walkthrough-results.json` | ✅ |
 | Store verification | `test-artifacts/store-verification.json` | ✅ 24/27 checks |
 | Test PDF | `test-artifacts/QA-Test-Workforce-Data.pdf` | ✅ |
 | Harness | `tests/e2e/*.ts` | ✅ re-runnable |
 
-**MP4 not produced — stating the limitation rather than claiming otherwise.**
-The only ffmpeg on this machine is Playwright's bundled build, which is
-WebM-only (`Unrecognized option 'movflags'`, then
-`Error initializing the muxer`). macOS `avconvert` cannot read VP9. A full
-ffmpeg (`brew install ffmpeg`) would produce the MP4 in one command — say the
-word and I will install it and convert.
+**MP4 now produced.** ffmpeg 9.0.2 was installed via Homebrew; both current
+recordings exist as `.webm` and `.mp4`, and the MP4s decode cleanly.
+
+**Two earlier recordings are no longer on disk.**
+`golden-sierra-rag-live-testing.webm` and
+`golden-sierra-rag-persistence.webm` were produced and verified during the
+first run (8.6 MB / 1.3 MB, durations 1:16 and ~0:20) but were removed from
+`test-artifacts/` afterwards. They were gitignored, so there is no copy in the
+repository. The harness that produced them is committed and re-runnable:
+`npx tsx tests/e2e/live-rag-walkthrough.ts`.
 
 **Secrets:** the admin password is entered into an `<input type="password">`,
 so the recording shows dots only. Artifacts were scanned: no API key string, no

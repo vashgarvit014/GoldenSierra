@@ -1,0 +1,37 @@
+{
+  "before": {
+    "qa": 0,
+    "scrape": 0,
+    "total": 3,
+    "intent": "find_job"
+  },
+  "applied": [
+    {
+      "title": "Scrapedata",
+      "was": "employer",
+      "status": 200,
+      "body": {
+        "updated": true,
+        "reindexed": true,
+        "chunks": 43
+      }
+    },
+    {
+      "title": "QA-Test-Workforce-Data",
+      "was": "employer",
+      "status": 200,
+      "body": {
+        "updated": true,
+        "reindexed": true,
+        "chunks": 3
+      }
+    }
+  ],
+  "after": {
+    "qa": 0,
+    "scrape": 3,
+    "total": 8,
+    "intent": "find_job"
+  },
+  "afterAnswer": "There's one caregiver opening in the knowledge base: In-Home Senior Care (Caregiver) with Golden Years in Placer County 12. It's a non-medical, in-home caregiver role — providing companionship, meal prep, light housekeeping, and personal care help like bathing and dressing 12. It appears on the weekly openings list and the agency's front page, so it's an active posting 45.\n\nThere are other openings, but none are caregiver work. For example, there's a Family Support Services Associate with El Dorado County Office of Education 34 — that's family support, not direct caregiving 3.\n\nYour next step: check the job listings page at goldensierra.com/help-for-job-seekers/jobs find the In-Home Senior Care (Caregiver) posting, and submit the job seeker interest form or call the office to ask about applying. Staff can confirm whether you may be eligible and help you get set up."
+}
