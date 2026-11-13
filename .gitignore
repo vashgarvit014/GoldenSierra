@@ -17,3 +17,4 @@ tsconfig.tsbuildinfo
 test-artifacts/*.webm
 test-artifacts/*.mp4
 test-artifacts/*.png
+.env.vercel-pulled

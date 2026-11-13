@@ -1,0 +1,63 @@
+[
+  {
+    "page": "Overview",
+    "checks": [
+      "✓ Knowledge Documents",
+      "✓ Vector Records",
+      "✓ \\b40\\b",
+      "✓ \\b389\\b",
+      "✓ System Status"
+    ],
+    "ok": true
+  },
+  {
+    "page": "Knowledge Base",
+    "checks": [
+      "✓ Indexed Documents",
+      "✓ Scrapedata",
+      "✓ Drop a PDF here"
+    ],
+    "ok": true
+  },
+  {
+    "page": "Website Crawler",
+    "checks": [
+      "✓ Knowledge Sources",
+      "✓ goldensierra\\.com",
+      "✓ Ingestion Jobs"
+    ],
+    "ok": true
+  },
+  {
+    "page": "Analytics",
+    "checks": [
+      "✓ Conversations",
+      "✓ What people ask"
+    ],
+    "ok": true
+  },
+  {
+    "page": "Settings",
+    "checks": [
+      "✓ Models and endpoints",
+      "✓ mercury-3",
+      "✓ bge-small"
+    ],
+    "ok": true
+  },
+  {
+    "page": "RAG Testing Lab",
+    "checks": [
+      "✓ real retrieval with passages"
+    ],
+    "ok": true
+  },
+  {
+    "page": "AI Workforce Chat",
+    "checks": [
+      "✓ streamed an answer with sources",
+      "answer length 2725 chars"
+    ],
+    "ok": true
+  }
+]
