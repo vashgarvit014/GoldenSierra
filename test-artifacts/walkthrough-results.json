@@ -1,0 +1,121 @@
+{
+  "base": "http://localhost:3100",
+  "uiChunks": 3,
+  "elapsedMs": 2148,
+  "resultText": "QA-Test-Workforce-Data.pdf: created, 3 chunks indexed.",
+  "log": [
+    {
+      "step": "open app",
+      "detail": "http://localhost:3100 title=\"Workforce Navigator — Golden Sierra\"",
+      "pass": true
+    },
+    {
+      "step": "chat UI",
+      "detail": "composer visible, session started",
+      "pass": true
+    },
+    {
+      "step": "admin gate",
+      "detail": "login form shown when signed out",
+      "pass": true
+    },
+    {
+      "step": "admin login",
+      "detail": "authenticated, Overview rendered",
+      "pass": true
+    },
+    {
+      "step": "dashboard stats",
+      "detail": "Documents indexed",
+      "pass": true
+    },
+    {
+      "step": "dashboard stats",
+      "detail": "Vectors in Qdrant",
+      "pass": true
+    },
+    {
+      "step": "knowledge sources",
+      "detail": "3 configured sources listed with document counts",
+      "pass": true
+    },
+    {
+      "step": "upload UI",
+      "detail": "upload control accessible",
+      "pass": true
+    },
+    {
+      "step": "upload",
+      "detail": "file submitted: QA-Test-Workforce-Data.pdf (2792 bytes)",
+      "pass": true
+    },
+    {
+      "step": "upload result (UI)",
+      "detail": "\"QA-Test-Workforce-Data.pdf: created, 3 chunks indexed.\" in 2.1s",
+      "pass": true
+    },
+    {
+      "step": "Q1",
+      "detail": "anchors found: NONE",
+      "pass": false
+    },
+    {
+      "step": "Q2",
+      "detail": "anchors found: Zarnexa, 47.50",
+      "pass": true
+    },
+    {
+      "step": "Q3",
+      "detail": "anchors found: NONE",
+      "pass": false
+    },
+    {
+      "step": "Q4",
+      "detail": "anchors found: Quillfeather",
+      "pass": true
+    },
+    {
+      "step": "after browser reload",
+      "detail": "retrieved: Quillfeather",
+      "pass": true
+    }
+  ],
+  "answers": [
+    {
+      "q": "What is the QA verification anchor token in the uploaded knowledge base?",
+      "a": "I help with Golden Sierra’s workforce services — job search help, training and scholarships, and support for employers. What can I assist you with?",
+      "grounded": false,
+      "cites": [],
+      "hit": []
+    },
+    {
+      "q": "What salary does Zarnexa Eldercare Collective offer for the caregiver team lead role?",
+      "a": "The uploaded knowledge base lists the caregiver team lead role at Zarnexa Eldercare Collective at $47.50 per hour for a full-time, four-day week 1.\n\nOne important caveat: that document is clearly marked as a synthetic QA test file with fictitious data — not real Golden Sierra employment information. The employer name, address, and contact are invented for testing purposes 1. So treat those figures as test data, not an actual open role.\n\nIf you're looking for real job listings or hiring help, the best next step is to visit Golden Sierra's employer page at goldensierra.com/help-for-employers or call (916) 746-7722 to talk with staff about current openings and services.",
+      "grounded": true,
+      "cites": [],
+      "hit": [
+        "Zarnexa",
+        "47.50"
+      ]
+    },
+    {
+      "q": "I am unemployed and looking for caregiver work. What opportunities are in the knowledge base?",
+      "a": "Yes — the knowledge base lists an In-Home Senior Care (Caregiver) opening at Golden Years in Placer County 14.\n\nGolden Sierra can give you a personalized referral to that job if you contact them 2. To get started, browse the current job listings at goldensierra.com/help-for-job-seekers/jobs, then submit the job seeker interest form or call (916) 746-7722 to speak with a career advisor 13. Staff can confirm whether you may be eligible for any related training or support.",
+      "grounded": false,
+      "cites": [],
+      "hit": []
+    },
+    {
+      "q": "How do I apply for the Quillfeather Diagnostics phlebotomy position?",
+      "a": "The knowledge base does not list a Quillfeather Diagnostics phlebotomy opening 1. I can't apply for you or share details about a position that isn't in our records.\n\nWhat I can help with:\n\nJob Search Assistance – Browse current local openings and get help applying with a career advisor 1. This can point you to available phlebotomy or related roles.\nCareer Counseling – Meet one-on-one with an advisor to map out your next step 3.\nCareer Workshops – Workshops on resumes and interviewing can strengthen your application 45.\n\nYour best next step: browse the current job listings at goldensierra.com/help-for-job-seekers/jobs, then call (916) 746-7722 to speak with an advisor 2. They can confirm what's open and help you apply.",
+      "grounded": true,
+      "cites": [],
+      "hit": [
+        "Quillfeather"
+      ]
+    }
+  ],
+  "reloadHit": [
+    "Quillfeather"
+  ]
+}

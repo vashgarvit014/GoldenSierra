@@ -14,3 +14,6 @@ next-env.d.ts
 tsconfig.tsbuildinfo
 .vercel
 .env*
+test-artifacts/*.webm
+test-artifacts/*.mp4
+test-artifacts/*.png

@@ -1,0 +1,71 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 2247 >>
+stream
+BT /F1 9 Tf 40 752 Td 11 TL
+(SYNTHETIC QA TEST DOCUMENT - FICTITIOUS DATA - NOT REAL GOLDEN SIERRA INFORMATION) Tj T*
+(Generated for automated RAG retrieval testing on 2026-11-13.) Tj T*
+(Every employer, salary and contact below is invented for testing purposes only.) Tj T*
+() Tj T*
+(QA TEST JOB LISTINGS \(FICTITIOUS\)) Tj T*
+() Tj T*
+(1. Caregiver Team Lead - Placer County) Tj T*
+(   Employer: Zarnexa Eldercare Collective \(FICTITIOUS EMPLOYER\)) Tj T*
+(   Location: 4417 Brambleton Way, Thornquist CA 95999 \(fictitious address\)) Tj T*
+(   Salary: 47.50 US dollars per hour) Tj T*
+(   Employment Type: Full-Time, four-day week) Tj T*
+(   Required Skills: companionship, medication reminders, mobility assistance) Tj T*
+(   Eligibility: QA-TEST-ELIG-7781 certification required within 90 days of hire) Tj T*
+(   Apply: submit reference code ZARNEXA-QA-4417 to the fictitious portal) Tj T*
+() Tj T*
+(2. Mobile Phlebotomy Technician - El Dorado County) Tj T*
+(   Employer: Quillfeather Diagnostics LLC \(FICTITIOUS EMPLOYER\)) Tj T*
+(   Location: 92 Harrowgate Loop, Vesper Hollow CA 95998 \(fictitious address\)) Tj T*
+(   Salary: 38.25 US dollars per hour plus mileage) Tj T*
+(   Employment Type: Part-Time) Tj T*
+(   Required Skills: venipuncture, specimen handling, route planning) Tj T*
+(   Eligibility: QA-TEST-ELIG-2290 state licence required) Tj T*
+(   Apply: reference code QUILL-QA-9220) Tj T*
+() Tj T*
+(3. Warehouse Robotics Assistant - Alpine County) Tj T*
+(   Employer: Marrowind Automation Partners \(FICTITIOUS EMPLOYER\)) Tj T*
+(   Location: 1 Candlewick Reach, Fallowmere CA 95997 \(fictitious address\)) Tj T*
+(   Salary: 31.00 US dollars per hour) Tj T*
+(   Employment Type: Seasonal, November through March) Tj T*
+(   Required Skills: conveyor maintenance, basic PLC troubleshooting) Tj T*
+(   Eligibility: QA-TEST-ELIG-5514 forklift endorsement) Tj T*
+(   Apply: reference code MARROW-QA-1551) Tj T*
+() Tj T*
+(QA VERIFICATION ANCHOR: the unique retrieval token for this document is) Tj T*
+(GOLDENSIERRA-QA-ANCHOR-8842. If a chatbot answer contains that token or any) Tj T*
+(fictitious employer named above, the answer was grounded in this PDF.) Tj T*
+() Tj T*
+(END OF SYNTHETIC QA TEST DOCUMENT - FICTITIOUS DATA) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000002540 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2608
+%%EOF

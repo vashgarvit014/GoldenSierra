@@ -1,0 +1,194 @@
+{
+  "document": {
+    "id": "cmwematmz000fuw4f0vzcqgmb",
+    "title": "QA-Test-Workforce-Data",
+    "url": "upload://QA-Test-Workforce-Data.pdf",
+    "type": "PDF",
+    "status": "INDEXED",
+    "audience": "employer",
+    "category": "general",
+    "wordCount": 237,
+    "contentChars": 1829,
+    "chunks": 3,
+    "embeddingModel": "Xenova/bge-small-en-v1.5",
+    "createdAt": "2026-11-13T06:50:27.851Z",
+    "updatedAt": "2026-11-13T06:50:28.727Z"
+  },
+  "qdrant": {
+    "collection": "gs_knowledge",
+    "dimensions": 384,
+    "vectorsForDoc": 3,
+    "totalPoints": 389
+  },
+  "retrieval": {
+    "noFilter": 1,
+    "asJobSeeker": 0,
+    "asEmployer": 3,
+    "topScore": 0.8509141
+  },
+  "scrapedataAudience": "employer",
+  "checks": [
+    {
+      "name": "document row exists",
+      "expected": "present",
+      "actual": "id=cmwematmz000fuw4f0vzcqgmb",
+      "pass": true
+    },
+    {
+      "name": "document title",
+      "expected": "QA-Test-Workforce-Data",
+      "actual": "QA-Test-Workforce-Data",
+      "pass": true
+    },
+    {
+      "name": "document type",
+      "expected": "PDF",
+      "actual": "PDF",
+      "pass": true
+    },
+    {
+      "name": "indexing status",
+      "expected": "INDEXED",
+      "actual": "INDEXED",
+      "pass": true
+    },
+    {
+      "name": "extracted content stored",
+      "expected": "> 500 chars",
+      "actual": "1829 chars",
+      "pass": true
+    },
+    {
+      "name": "anchor token in stored text",
+      "expected": "GOLDENSIERRA-QA-ANCHOR-8842",
+      "actual": "present",
+      "pass": true
+    },
+    {
+      "name": "chunk count",
+      "expected": "> 0",
+      "actual": "3",
+      "pass": true
+    },
+    {
+      "name": "every chunk embedded",
+      "expected": "3/3",
+      "actual": "3/3",
+      "pass": true
+    },
+    {
+      "name": "embedding model recorded",
+      "expected": "Xenova/bge-small-en-v1.5",
+      "actual": "Xenova/bge-small-en-v1.5",
+      "pass": true
+    },
+    {
+      "name": "sourceId",
+      "expected": "may be null for a direct upload",
+      "actual": "null",
+      "pass": true
+    },
+    {
+      "name": "timestamps",
+      "expected": "createdAt + updatedAt set",
+      "actual": "2026-11-13T06:50:27.851Z / 2026-11-13T06:50:28.727Z",
+      "pass": true
+    },
+    {
+      "name": "audience classification",
+      "expected": "job_seeker or both (these are job listings)",
+      "actual": "employer",
+      "pass": false
+    },
+    {
+      "name": "category classification",
+      "expected": "a workforce category",
+      "actual": "general",
+      "pass": true
+    },
+    {
+      "name": "access level",
+      "expected": "PUBLIC",
+      "actual": "PUBLIC",
+      "pass": true
+    },
+    {
+      "name": "collection exists",
+      "expected": "gs_knowledge",
+      "actual": "present",
+      "pass": true
+    },
+    {
+      "name": "vector dimensions",
+      "expected": "384",
+      "actual": "384",
+      "pass": true
+    },
+    {
+      "name": "collection status",
+      "expected": "green",
+      "actual": "green",
+      "pass": true
+    },
+    {
+      "name": "vectors for this document",
+      "expected": "3",
+      "actual": "3",
+      "pass": true
+    },
+    {
+      "name": "payload: documentId",
+      "expected": "cmwematmz000fuw4f0vzcqgmb",
+      "actual": "cmwematmz000fuw4f0vzcqgmb",
+      "pass": true
+    },
+    {
+      "name": "payload: title",
+      "expected": "QA-Test-Workforce-Data",
+      "actual": "QA-Test-Workforce-Data",
+      "pass": true
+    },
+    {
+      "name": "payload: documentType",
+      "expected": "PDF",
+      "actual": "PDF",
+      "pass": true
+    },
+    {
+      "name": "payload: audience",
+      "expected": "employer",
+      "actual": "employer",
+      "pass": true
+    },
+    {
+      "name": "payload: accessLevel",
+      "expected": "PUBLIC",
+      "actual": "PUBLIC",
+      "pass": true
+    },
+    {
+      "name": "retrievable, no audience filter",
+      "expected": ">= 1 chunk",
+      "actual": "1 of 10",
+      "pass": true
+    },
+    {
+      "name": "retrievable with audience=job_seeker",
+      "expected": ">= 1 chunk",
+      "actual": "0 of 10",
+      "pass": false
+    },
+    {
+      "name": "Scrapedata.pdf audience fixed",
+      "expected": "job_seeker or both",
+      "actual": "employer",
+      "pass": false
+    },
+    {
+      "name": "PostgreSQL/Qdrant consistency",
+      "expected": "chunk count === point count",
+      "actual": "389 chunks / 389 points",
+      "pass": true
+    }
+  ]
+}
