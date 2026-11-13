@@ -8,7 +8,10 @@ import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+// 60s is the ceiling on Vercel's Hobby plan, and a route declaring more fails
+// the deployment outright. Long-running ingestion does not belong in a
+// serverless request anyway — run `npm run ingest` from the CLI or a worker.
+export const maxDuration = 60;
 
 /**
  * POST /api/admin/documents/upload — multipart PDF upload.

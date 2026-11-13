@@ -56,7 +56,13 @@ export function getQdrant(): QdrantClient {
   return client;
 }
 
-export const COLLECTION = env.QDRANT_COLLECTION;
+/**
+ * Resolved per call, not at module scope: a top-level `env.X` would force
+ * configuration to load while `next build` is merely importing this file.
+ */
+function collection(): string {
+  return env.QDRANT_COLLECTION;
+}
 
 /**
  * Creates the collection when missing and installs payload indexes for every
@@ -67,24 +73,24 @@ export async function ensureCollection(): Promise<{ created: boolean; dimensions
   const dimensions = embeddingDimensions();
 
   const { collections } = await qdrant.getCollections();
-  const exists = collections.some((c) => c.name === COLLECTION);
+  const exists = collections.some((c) => c.name === collection());
 
   if (!exists) {
-    await qdrant.createCollection(COLLECTION, {
+    await qdrant.createCollection(collection(), {
       vectors: { size: dimensions, distance: 'Cosine' },
       optimizers_config: { default_segment_number: 2 },
       on_disk_payload: true,
     });
-    logger.info('Created Qdrant collection', { collection: COLLECTION, dimensions });
+    logger.info('Created Qdrant collection', { collection: collection(), dimensions });
   } else {
     // Guard against an embedding-model change that silently breaks search.
-    const info = await qdrant.getCollection(COLLECTION);
+    const info = await qdrant.getCollection(collection());
     const params = info.config?.params?.vectors;
     const existingSize =
       typeof params === 'object' && params && 'size' in params ? Number(params.size) : undefined;
     if (existingSize && existingSize !== dimensions) {
       throw new Error(
-        `Qdrant collection "${COLLECTION}" has ${existingSize}-dimensional vectors but the ` +
+        `Qdrant collection "${collection()}" has ${existingSize}-dimensional vectors but the ` +
           `configured embedding model produces ${dimensions}. Either restore the previous ` +
           `EMBEDDING_MODEL/EMBEDDING_DIMENSIONS, or use a new QDRANT_COLLECTION name and re-index.`,
       );
@@ -104,7 +110,7 @@ export async function ensureCollection(): Promise<{ created: boolean; dimensions
     'language',
   ]) {
     try {
-      await qdrant.createPayloadIndex(COLLECTION, { field_name: field, field_schema: 'keyword' });
+      await qdrant.createPayloadIndex(collection(), { field_name: field, field_schema: 'keyword' });
     } catch {
       // Already present — Qdrant errors rather than treating this as a no-op.
     }
@@ -114,7 +120,7 @@ export async function ensureCollection(): Promise<{ created: boolean; dimensions
   // these; without them Qdrant rejects the query outright.
   for (const field of ['content', 'title']) {
     try {
-      await qdrant.createPayloadIndex(COLLECTION, {
+      await qdrant.createPayloadIndex(collection(), {
         field_name: field,
         field_schema: {
           type: 'text',
@@ -156,7 +162,7 @@ export async function upsertPoints(points: UpsertPoint[]): Promise<void> {
     const batch = points.slice(i, i + BATCH);
     await withRetry(
       () =>
-        qdrant.upsert(COLLECTION, {
+        qdrant.upsert(collection(), {
           wait: true,
           points: batch.map((p) => ({ id: p.id, vector: p.vector, payload: p.payload as never })),
         }),
@@ -213,7 +219,7 @@ export async function searchVectors(
   // Qdrant's Query API supersedes the removed `search` method.
   const response = await withRetry(
     () =>
-      qdrant.query(COLLECTION, {
+      qdrant.query(collection(), {
         query: vector,
         limit,
         filter: buildFilter(filters) as never,
@@ -242,7 +248,7 @@ export async function scrollByKeywords(
 
   // Here `should` is exactly right: a result must satisfy the access/audience
   // constraints in `must` AND match at least one of the phrases.
-  const response = await qdrant.scroll(COLLECTION, {
+  const response = await qdrant.scroll(collection(), {
     limit,
     with_payload: true,
     filter: {
@@ -267,7 +273,7 @@ export async function deleteByDocument(documentId: string): Promise<void> {
   const qdrant = getQdrant();
   await withRetry(
     () =>
-      qdrant.delete(COLLECTION, {
+      qdrant.delete(collection(), {
         wait: true,
         filter: { must: [{ key: 'documentId', match: { value: documentId } }] } as never,
       }),
@@ -279,7 +285,7 @@ export async function deleteByDocument(documentId: string): Promise<void> {
 export async function deleteByChunkIds(chunkIds: string[]): Promise<void> {
   if (chunkIds.length === 0) return;
   const qdrant = getQdrant();
-  await qdrant.delete(COLLECTION, { wait: true, points: chunkIds.map(pointIdForChunk) });
+  await qdrant.delete(collection(), { wait: true, points: chunkIds.map(pointIdForChunk) });
 }
 
 export async function collectionStats(): Promise<{
@@ -291,7 +297,7 @@ export async function collectionStats(): Promise<{
 }> {
   try {
     const qdrant = getQdrant();
-    const info = await qdrant.getCollection(COLLECTION);
+    const info = await qdrant.getCollection(collection());
     const params = info.config?.params?.vectors;
     return {
       exists: true,

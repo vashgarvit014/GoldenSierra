@@ -317,6 +317,10 @@ Program names, descriptions and contact details are **facts transcribed from
 public pages**, each cited in `prisma/seed.ts` with the URL it came from and
 the date it was read (2026-11-12).
 
+Deploying to Vercel? Read [docs/VERCEL.md](docs/VERCEL.md) first — the
+chatbot works there, but ingestion and the default local embedding model do
+not.
+
 Further reading: [docs/VERIFICATION.md](docs/VERIFICATION.md) ·
 [docs/BEHAVIOR-SPEC.md](docs/BEHAVIOR-SPEC.md) ·
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/VERCEL.md](docs/VERCEL.md)

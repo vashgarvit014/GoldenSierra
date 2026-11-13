@@ -92,17 +92,84 @@ const schema = z.object({
   CHAT_RETENTION_DAYS: int(30),
 });
 
-const parsed = schema.safeParse(process.env);
+type ParsedEnv = z.infer<typeof schema>;
 
-if (!parsed.success) {
+/**
+ * Validation is deferred to first access rather than running at import.
+ *
+ * `next build` imports every route module to collect its metadata, so
+ * validating at module scope made a build impossible without production
+ * secrets present — which is exactly the situation on a CI or Vercel build
+ * step, and it failed there with "Failed to collect configuration for
+ * /api/admin/config".
+ *
+ * Deferring loses nothing: the point of validation is that a misconfigured
+ * *deployment* fails loudly instead of halfway through a conversation, and
+ * that still holds. `assertEnv()` is called at server start
+ * (src/instrumentation.ts) so a bad config fails at boot, not on first use.
+ */
+let cache: ParsedEnv | undefined;
+
+/** True while `next build` is collecting route metadata. */
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === 'phase-production-build';
+}
+
+function loadEnv(): ParsedEnv {
+  if (cache) return cache;
+
+  const parsed = schema.safeParse(process.env);
+  if (parsed.success) {
+    cache = parsed.data;
+    return cache;
+  }
+
+  const issues = parsed.error.issues
+    .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
+    .join('\n');
+
+  // A build must not require runtime secrets. Fall back to placeholders so
+  // route metadata can be collected; the real values are read at request time.
+  if (isBuildPhase()) {
+    const relaxed = schema.safeParse({
+      ...process.env,
+      DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://build:build@localhost:5432/build',
+    });
+    if (relaxed.success) {
+      cache = relaxed.data;
+      return cache;
+    }
+  }
+
+  throw new Error(`Invalid environment configuration:\n${issues}`);
+}
+
+/**
+ * Validates now and throws on a bad configuration. Call at server start so a
+ * deployment with missing variables fails immediately and visibly.
+ */
+export function assertEnv(): void {
+  const parsed = schema.safeParse(process.env);
+  if (parsed.success) return;
   const issues = parsed.error.issues
     .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
     .join('\n');
   throw new Error(`Invalid environment configuration:\n${issues}`);
 }
 
-export const env = parsed.data;
-export type Env = typeof env;
+/**
+ * Reads like a plain object; each property access resolves through the
+ * validated config, loading it on first use.
+ */
+export const env = new Proxy({} as ParsedEnv, {
+  get: (_t, key: string) => loadEnv()[key as keyof ParsedEnv],
+  has: (_t, key: string) => key in loadEnv(),
+  ownKeys: () => Reflect.ownKeys(loadEnv()),
+  getOwnPropertyDescriptor: (_t, key: string) =>
+    Object.getOwnPropertyDescriptor(loadEnv(), key),
+});
+
+export type Env = ParsedEnv;
 
 /** The LLM needs a key; the app should still boot without one so the admin
  *  dashboard and ingestion tooling remain usable. Callers check this. */

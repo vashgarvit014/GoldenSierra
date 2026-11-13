@@ -30,9 +30,26 @@ let pipelinePromise: Promise<FeatureExtractionPipeline> | undefined;
 async function getExtractor(): Promise<FeatureExtractionPipeline> {
   pipelinePromise ??= (async () => {
     const started = Date.now();
+
     // Imported lazily so the package is never loaded in a deployment that
     // uses a hosted embedding provider.
-    const { pipeline, env: hfEnv } = await import('@huggingface/transformers');
+    let pipeline: typeof import('@huggingface/transformers').pipeline;
+    let hfEnv: typeof import('@huggingface/transformers').env;
+    try {
+      ({ pipeline, env: hfEnv } = await import('@huggingface/transformers'));
+    } catch (err) {
+      // The package is excluded from serverless bundles because it cannot fit
+      // inside the function size limit. Say so plainly rather than surfacing
+      // a bare MODULE_NOT_FOUND.
+      throw new Error(
+        'Local embeddings are unavailable in this environment. The model runtime ' +
+          '(~570MB) exceeds serverless function size limits and is excluded from the bundle. ' +
+          'Set EMBEDDING_PROVIDER=openai with EMBEDDING_API_KEY / EMBEDDING_MODEL / ' +
+          'EMBEDDING_DIMENSIONS and re-index, or deploy as a container where the ' +
+          'local model can run. Original error: ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
 
     // Allow remote download on first use, then serve from the local cache.
     hfEnv.allowLocalModels = true;

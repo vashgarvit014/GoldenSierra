@@ -8,7 +8,10 @@ import type { ChatTurn, UserProfile } from '@/types/chat';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+// 60s is the ceiling on Vercel's Hobby plan, and a route declaring more fails
+// the deployment outright. Long-running ingestion does not belong in a
+// serverless request anyway — run `npm run ingest` from the CLI or a worker.
+export const maxDuration = 60;
 
 const BodySchema = z.object({
   message: z.string().min(1).max(2000),

@@ -1,4 +1,4 @@
-import { env, hasEmbeddings } from '@/lib/env';
+import { assertEnv, env, hasEmbeddings } from '@/lib/env';
 import { logger } from '@/lib/logger';
 
 /**
@@ -11,6 +11,11 @@ import { logger } from '@/lib/logger';
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+
+  // Validation moved out of module scope so `next build` does not require
+  // production secrets. Enforce it here instead: a deployment missing a
+  // variable fails at startup, visibly, rather than on a user's first message.
+  assertEnv();
   if (env.EMBEDDING_PROVIDER !== 'local' || !hasEmbeddings()) return;
 
   logger.info('Warming local embedding model…', { model: env.EMBEDDING_MODEL });
