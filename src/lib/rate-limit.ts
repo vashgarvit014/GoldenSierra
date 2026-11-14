@@ -1,5 +1,6 @@
 import { env } from './env';
 import { tooManyRequests } from './errors';
+import { logger } from './logger';
 
 /**
  * Fixed-window limiter. In-memory by default; backed by Redis when REDIS_URL is
@@ -29,11 +30,20 @@ export async function checkRateLimit(
 
   const redis = await getRedis();
   if (redis) {
-    const windowKey = `rl:${key}:${Math.floor(now / windowMs)}`;
-    const count = await redis.incr(windowKey);
-    if (count === 1) await redis.pexpire(windowKey, windowMs);
-    const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
-    return { allowed: count <= limit, remaining: Math.max(0, limit - count), resetAt };
+    try {
+      const windowKey = `rl:${key}:${Math.floor(now / windowMs)}`;
+      const count = await redis.incr(windowKey);
+      if (count === 1) await redis.pexpire(windowKey, windowMs);
+      const resetAt = (Math.floor(now / windowMs) + 1) * windowMs;
+      return { allowed: count <= limit, remaining: Math.max(0, limit - count), resetAt };
+    } catch (err) {
+      // Rate limiting is a guard rail, not a dependency. If the store is
+      // unreachable the request still proceeds, counted in memory.
+      redisUnavailable = true;
+      logger.warn('Redis rate-limit check failed; counting in memory', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   const existing = buckets.get(key);
@@ -66,16 +76,50 @@ type RedisLike = {
   pexpire(key: string, ms: number): Promise<number>;
 };
 
+/**
+ * Set once Redis has proved unreachable, so we stop retrying it for the life
+ * of the process and serve every subsequent request from the in-memory
+ * limiter instead.
+ */
+let redisUnavailable = false;
+
 async function getRedis(): Promise<RedisLike | null> {
-  if (!env.REDIS_URL) return null;
+  if (!env.REDIS_URL || redisUnavailable) return null;
+
   redisPromise ??= (async () => {
     try {
       const { default: Redis } = await import('ioredis');
-      return new Redis(env.REDIS_URL!, { maxRetriesPerRequest: 2, lazyConnect: false }) as unknown as RedisLike;
-    } catch {
+      const client = new Redis(env.REDIS_URL!, {
+        maxRetriesPerRequest: 1,
+        connectTimeout: 2000,
+        enableOfflineQueue: false,
+        lazyConnect: false,
+        // Give up quickly rather than reconnecting forever behind every request.
+        retryStrategy: (times) => (times > 2 ? null : 200),
+      });
+
+      // ioredis emits 'error' on an unreachable server. Without a listener
+      // Node treats it as an unhandled error event, which took down the whole
+      // request — a rate limiter must never be able to do that.
+      client.on('error', (err: Error) => {
+        if (!redisUnavailable) {
+          redisUnavailable = true;
+          logger.warn('Redis unreachable; falling back to in-memory rate limiting', {
+            error: err.message,
+          });
+        }
+      });
+
+      return client as unknown as RedisLike;
+    } catch (err) {
+      redisUnavailable = true;
+      logger.warn('Could not load the Redis client; using in-memory rate limiting', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   })();
+
   return redisPromise;
 }
 

@@ -24,7 +24,15 @@ async function getQueue(): Promise<QueueLike | null> {
     try {
       const { Queue } = await import('bullmq');
       const queue = new Queue(QUEUE_NAME, {
-        connection: { url: env.REDIS_URL! },
+        connection: {
+          url: env.REDIS_URL!,
+          // Fail fast instead of reconnecting forever: if the queue is
+          // unreachable we run the job in-process rather than hanging.
+          maxRetriesPerRequest: 1,
+          connectTimeout: 2000,
+          enableOfflineQueue: false,
+          retryStrategy: (times: number) => (times > 2 ? null : 200),
+        },
         defaultJobOptions: {
           attempts: 2,
           backoff: { type: 'exponential', delay: 5000 },
@@ -32,6 +40,13 @@ async function getQueue(): Promise<QueueLike | null> {
           removeOnFail: { count: 200 },
         },
       });
+      // Without an error listener an unreachable Redis raises an unhandled
+      // error event and takes the request down with it.
+      (queue as unknown as { on: (e: string, cb: (err: Error) => void) => void }).on(
+        'error',
+        (err) => logger.warn('Ingestion queue error; jobs will run in-process', { error: err.message }),
+      );
+
       logger.info('Ingestion queue connected', { queue: QUEUE_NAME });
       return queue as unknown as QueueLike;
     } catch (err) {
