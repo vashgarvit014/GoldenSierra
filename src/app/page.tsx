@@ -1,18 +1,12 @@
-import Link from 'next/link';
-import { ChatPanel } from '@/components/chat/ChatPanel';
+import { Session } from '@/components/counselor/Session';
+import './counselor.css';
 
+export const dynamic = 'force-dynamic';
+
+/**
+ * The public experience is counselor mode: understand first, recommend last.
+ * The earlier direct-answer chat is still available at /chat.
+ */
 export default function HomePage() {
-  return (
-    <div className="flex h-dvh flex-col">
-      <main className="min-h-0 flex-1">
-        <ChatPanel />
-      </main>
-      <Link
-        href="/admin"
-        className="sr-only focus:not-sr-only focus:absolute focus:bottom-2 focus:right-2 focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-xs"
-      >
-        Admin dashboard
-      </Link>
-    </div>
-  );
+  return <Session />;
 }

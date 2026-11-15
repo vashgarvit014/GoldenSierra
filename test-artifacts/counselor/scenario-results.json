@@ -1,0 +1,87 @@
+[
+  {
+    "name": "helper mode starts a session",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "asks exactly one question",
+    "ok": true,
+    "detail": "1 question marks"
+  },
+  {
+    "name": "does not dump a program list",
+    "ok": true,
+    "detail": "98 words"
+  },
+  {
+    "name": "speaks about \"she/they\", not \"you\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "panel shows former foster youth",
+    "ok": true,
+    "detail": "✓ | Young adult (16–24) | Population ; ✓ | Former foster youth | Population ; ✓ | Healthcare | Career pathway "
+  },
+  {
+    "name": "panel shows healthcare",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "panel shows GED",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "panel records Auburn and no transport",
+    "ok": true,
+    "detail": "✓ | Auburn, Placer County — no transport | Geography"
+  },
+  {
+    "name": "still only one question",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "narrowing count is truthful (12-program catalogue)",
+    "ok": true,
+    "detail": "8 of 12"
+  },
+  {
+    "name": "no fabricated 95 total",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "still only one question",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "quick replies offered",
+    "ok": true,
+    "detail": "0 buttons"
+  },
+  {
+    "name": "See Results becomes available",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "results show recommendation cards",
+    "ok": true,
+    "detail": "6 cards"
+  },
+  {
+    "name": "no asserted eligibility",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "eligibility framed as needing confirmation",
+    "ok": true,
+    "detail": ""
+  }
+]
