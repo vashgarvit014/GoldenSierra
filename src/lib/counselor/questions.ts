@@ -200,6 +200,17 @@ export type QuestionChoice = {
  * to stop clarifying and show results, which is what prevents the infinite
  * question loop the brief warns about.
  */
+/** How many times we have put a given question to them. */
+function timesAsked(asked: string[], id: string): number {
+  return asked.filter((a) => a === id).length;
+}
+
+/** Ask twice at most; past that, silence is an answer of its own. */
+const MAX_ASKS = 2;
+
+/** Questions whose answers change the shortlist enough to be worth waiting for. */
+const DECISIVE: QuestionId[] = ['transportation', 'incomeUrgency'];
+
 export function selectNextQuestion(
   ctx: CounselorContext,
   candidates: ProgramMatch[],
@@ -208,9 +219,12 @@ export function selectNextQuestion(
   const live = candidates.filter((c) => c.state !== 'mismatch');
 
   const scored = QUESTIONS.filter((q) => {
-    if (asked.includes(q.id)) return false;
     if (q.applicable && !q.applicable(ctx)) return false;
-    return !isAnswered(q, ctx);
+    if (isAnswered(q, ctx)) return false;
+    // Being asked is not the same as being answered — people often reply to
+    // something else first. Allow one more attempt, then let it go rather
+    // than badgering them.
+    return timesAsked(asked, q.id) < MAX_ASKS;
   }).map((q) => {
     const buckets = new Map<string, number>();
     for (const m of live) {
@@ -220,7 +234,9 @@ export function selectNextQuestion(
     // Blend measured split with the question's intrinsic usefulness, so a
     // thin catalogue still asks sensible things rather than nothing.
     const measured = entropy(buckets, live.length);
-    const gain = live.length >= 3 ? measured * 0.65 + q.baseValue * 0.35 : q.baseValue;
+    const base = live.length >= 3 ? measured * 0.65 + q.baseValue * 0.35 : q.baseValue;
+    // A question they already sidestepped goes behind anything still fresh.
+    const gain = timesAsked(asked, q.id) > 0 ? base * 0.5 : base;
     return { question: q, gain };
   });
 
@@ -229,7 +245,12 @@ export function selectNextQuestion(
 
   const best = scored[0]!;
   // Below this, asking costs the user more than the answer is worth.
-  return best.gain >= 0.25 ? best : null;
+  if (best.gain >= 0.25) return best;
+
+  // …except for the handful that genuinely decide the shortlist. Dropping one
+  // of these because a re-ask scored low would send us to recommendations
+  // while still missing the thing we said we needed.
+  return scored.find((x) => DECISIVE.includes(x.question.id)) ?? null;
 }
 
 function isAnswered(q: Question, ctx: CounselorContext): boolean {
@@ -274,12 +295,12 @@ export function readyForResults(
   const applied = criteriaFor(ctx).filter((c) => c.applied).length;
   const live = candidates.filter((c) => c.state !== 'mismatch').length;
 
-  const decisive: QuestionId[] = ['transportation', 'incomeUrgency'];
-  const outstanding = decisive.filter((id) => {
-    if (asked.includes(id)) return false;
+  const outstanding = DECISIVE.filter((id) => {
     const q = QUESTIONS.find((x) => x.id === id);
     if (!q || (q.applicable && !q.applicable(ctx))) return false;
-    return !isAnswered(q, ctx);
+    if (isAnswered(q, ctx)) return false;
+    // Still worth waiting for while we may legitimately ask again.
+    return timesAsked(asked, id) < MAX_ASKS;
   });
   if (outstanding.length > 0) return false;
 

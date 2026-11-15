@@ -12,17 +12,17 @@
   {
     "name": "does not dump a program list",
     "ok": true,
-    "detail": "88 words"
+    "detail": "71 words"
   },
   {
-    "name": "speaks about \"she/they\", not \"you\"",
+    "name": "speaks about the youth in the third person",
     "ok": true,
     "detail": ""
   },
   {
     "name": "panel shows former foster youth",
     "ok": true,
-    "detail": "New chat ; Young adult (16–24) ; Former foster youth ; Healthcare ; Needs GED / HiSET ; 19 years old ; 8 of 12"
+    "detail": "Young adult (16–24) ; Former foster youth ; Healthcare ; Needs GED / HiSET ; 19 years old ; 8 of 12 services m"
   },
   {
     "name": "panel shows healthcare",
@@ -45,6 +45,11 @@
     "detail": ""
   },
   {
+    "name": "quick replies offered while clarifying",
+    "ok": true,
+    "detail": "3 buttons"
+  },
+  {
     "name": "narrowing count is truthful (12-program catalogue)",
     "ok": true,
     "detail": "8 of 12"
@@ -60,11 +65,6 @@
     "detail": ""
   },
   {
-    "name": "quick replies offered",
-    "ok": true,
-    "detail": "0 buttons"
-  },
-  {
     "name": "recommendations arrive without an extra step",
     "ok": true,
     "detail": "shown automatically"
@@ -72,7 +72,7 @@
   {
     "name": "results show recommendation cards",
     "ok": true,
-    "detail": "12 cards"
+    "detail": "6 cards"
   },
   {
     "name": "no asserted eligibility",

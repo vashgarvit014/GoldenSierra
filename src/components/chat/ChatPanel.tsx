@@ -204,7 +204,7 @@ export function ChatPanel() {
             </button>
 
             {showContext && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-2 flex flex-wrap gap-1.5" data-noted>
                 {facts.map((f) => (
                   <Badge key={f.key} tone="success" title={f.dimension}>
                     <Check className="h-3 w-3" aria-hidden="true" />
@@ -500,14 +500,24 @@ function AssistantTurn({
       )}
 
       {isResults && t.recommendations.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
-            {t.recommendations.length === 1 ? 'Service that may fit' : 'Services that may fit'}
+        // Only the newest set is spelled out. Earlier ones were drawn from
+        // less information, so repeating them stacks stale cards up the
+        // transcript and contradicts the current count.
+        isLatest ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+              {t.recommendations.length === 1 ? 'Service that may fit' : 'Services that may fit'}
+            </p>
+            {t.recommendations.map((m) => (
+              <RecommendationCard key={m.id} recommendation={toRecommendation(m)} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted">
+            {t.recommendations.length} service{t.recommendations.length === 1 ? '' : 's'} suggested
+            here — updated further down as we learned more.
           </p>
-          {t.recommendations.map((m) => (
-            <RecommendationCard key={m.id} recommendation={toRecommendation(m)} />
-          ))}
-        </div>
+        )
       )}
     </div>
   );

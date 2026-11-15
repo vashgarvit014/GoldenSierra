@@ -52,7 +52,8 @@ async function notedFacts(page: Page): Promise<string[]> {
   if ((await toggle.count()) === 0) return [];
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await page.waitForTimeout(250);
-  return page.locator('header span').allInnerTexts();
+  // The strip only — the header also carries the "New chat" control.
+  return page.locator('header [data-noted] span').allInnerTexts();
 }
 
 (async () => {
@@ -91,7 +92,12 @@ async function notedFacts(page: Page): Promise<string[]> {
       !/1\.\s|•|\n-\s/.test(a1) && a1.length < 900,
       `${a1.split(/\s+/).length} words`,
     );
-    check('speaks about "she/they", not "you"', !/\byou\b/i.test(a1.replace(/you've told me/gi, '')), '');
+    // In helper mode "you" is the helper ("I hear you're helping…"), which is
+    // correct. What must not happen is addressing the young person directly.
+    const addressesYouth = /\byou(r)?\s+(ged|diploma|resume|skills|career|training|eligibility)\b/i.test(a1)
+      || /\byou\s+(are|aren't|haven't|need|qualify|may qualify)\b/i.test(a1);
+    const thirdPerson = /\b(she|her|they|their|them)\b/i.test(a1);
+    check('speaks about the youth in the third person', thirdPerson && !addressesYouth, thirdPerson ? '' : 'no she/they found');
 
     let facts = await notedFacts(page);
     check(
@@ -112,6 +118,10 @@ async function notedFacts(page: Page): Promise<string[]> {
       facts.find((f) => /auburn/i.test(f)) ?? '',
     );
     check('still only one question', (a2.match(/\?/g) ?? []).length <= 1);
+    // Quick replies matter on a question turn: they are how someone answers
+    // without typing. They legitimately disappear once results are shown.
+    const replies = await page.locator('button.rounded-full').count();
+    check('quick replies offered while clarifying', replies > 0, `${replies} buttons`);
     await page.screenshot({ path: path.join(OUT, '3-after-transport.png') });
 
     // ── narrowing must be real, never invented ──
@@ -133,9 +143,7 @@ async function notedFacts(page: Page): Promise<string[]> {
     const a3 = await say(page, 'She needs income as soon as possible.', 'income urgency');
     check('still only one question', (a3.match(/\?/g) ?? []).length <= 1);
 
-    // ── quick replies are real ──
-    const replies = await page.locator('button.rounded-full').count();
-    check('quick replies offered', replies >= 0, `${replies} buttons`);
+    // (quick replies were asserted above, while still clarifying)
 
     // ── 11: results ──
     // Recommendations arrive on their own once nothing useful is left to ask;

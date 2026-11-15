@@ -182,9 +182,16 @@ describe('readyForResults', () => {
     expect(readyForResults(ctx, candidates, [])).toBe(true);
   });
 
-  it('treats an asked-but-skipped question as covered, so it cannot loop', () => {
+  it('keeps waiting when a decisive question was asked but sidestepped', () => {
     const ctx = base({ county: 'Placer', careerInterest: 'healthcare' });
-    expect(readyForResults(ctx, candidates, ['transportation', 'incomeUrgency'])).toBe(true);
+    // Asked once, answered neither — people often reply to something else.
+    expect(readyForResults(ctx, candidates, ['transportation', 'incomeUrgency'])).toBe(false);
+  });
+
+  it('stops waiting after a second unanswered ask, so it cannot loop', () => {
+    const ctx = base({ county: 'Placer', careerInterest: 'healthcare' });
+    const asked = ['transportation', 'incomeUrgency', 'transportation', 'incomeUrgency'];
+    expect(readyForResults(ctx, candidates, asked)).toBe(true);
   });
 });
 
