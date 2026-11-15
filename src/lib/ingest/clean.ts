@@ -55,6 +55,46 @@ export function detectCounties(text: string): string[] {
 
 export type Audience = 'job_seeker' | 'employer' | 'both' | 'agency';
 
+/**
+ * Detects a job-listing document — a list of open positions.
+ *
+ * These are *for job seekers*, but a naive keyword tally labels them
+ * `employer` because "Employer" and "Company" appear as a column label on
+ * every row. That misclassification made an uploaded listings PDF invisible
+ * to the audience it was meant for, since audience is a hard retrieval filter.
+ *
+ * The giveaway is posting structure — pay, how to apply, position titles —
+ * repeated across entries, which employer-services pages never have.
+ */
+export function isJobListing(title: string, text: string): boolean {
+  const hay = `${title}\n${text.slice(0, 12_000)}`;
+
+  const payHits = countRaw(hay, /\b(salary|per hour|\/hr\b|hourly|wage|\$\s?\d{1,3}(?:[.,]\d{2})?\s*(?:-|to|per|\/))/gi);
+  const applyHits = countRaw(hay, /\b(apply now|how to apply|application link|apply at|submit an application|reference code)\b/gi);
+  const postingHits = countRaw(hay, /\b(job title|position|opening|vacancy|employment type|full[- ]time|part[- ]time|date posted|deadline)\b/gi);
+  const employerLabel = countRaw(hay, /\bemployer\s*(?:\/|:|\||-)\s*(?:company|name)?/gi);
+
+  // Two independent posting signals, repeated — not one passing mention.
+  const signals = [payHits >= 2, applyHits >= 1, postingHits >= 3, employerLabel >= 1].filter(Boolean).length;
+  return signals >= 3;
+}
+
+/**
+ * True when the text addresses an employer directly. This is what actually
+ * separates employer *services* ("we can post your job openings") from a job
+ * *listing* that merely names employers.
+ */
+function addressesEmployer(text: string): boolean {
+  return (
+    countRaw(text, /\b(your (business|company|staff|employees|job openings|workforce|hiring))\b/gi) >= 1 ||
+    countRaw(text, /\b(post your job|help you hire|your new employee|reimburse(ment)? (you|your)|for employers)\b/gi) >= 1
+  );
+}
+
+function countRaw(haystack: string, pattern: RegExp): number {
+  return (haystack.match(pattern) ?? []).length;
+}
+
 export function detectAudience(url: string | null, title: string, text: string): Audience {
   const path = (url ?? '').toLowerCase();
   if (/job-seeker|jobseeker/.test(path)) return 'job_seeker';
@@ -67,15 +107,21 @@ export function detectAudience(url: string | null, title: string, text: string):
     return 'agency';
   }
 
+  // A list of open positions is job seeker material, however many times the
+  // word "employer" appears in it as a field label.
+  if (isJobListing(title, text) && !addressesEmployer(text)) return 'job_seeker';
+
   const haystack = `${title} ${text.slice(0, 2500)}`.toLowerCase();
   const jobSeekerHits = count(
     haystack,
     /\b(job seeker|resume|interview|scholarship|internship|career counsel|find a job|training)\b/g,
   );
-  const employerHits = count(
-    haystack,
-    /\b(employer|business|hiring|recruit|on-the-job training|wage reimbursement|layoff)\b/g,
-  );
+  // "employer" and "company" are dropped here: as bare nouns they are just as
+  // common in listings as in employer services, so they carry no signal. What
+  // distinguishes employer content is being addressed TO an employer.
+  const employerHits =
+    count(haystack, /\b(hiring|recruit|on-the-job training|wage reimbursement|layoff|rapid response)\b/g) +
+    (addressesEmployer(text) ? 3 : 0);
 
   if (jobSeekerHits > employerHits * 2) return 'job_seeker';
   if (employerHits > jobSeekerHits * 2) return 'employer';
@@ -205,6 +251,8 @@ export function detectCategory(url: string | null, title: string, text: string):
   const path = (url ?? '').toLowerCase();
   if (GOVERNANCE_TITLE.test(title)) return 'policy';
   if (GENERAL_PATHS.test(path)) return 'general';
+  // Listings answer "what jobs are open", not "who is eligible".
+  if (isJobListing(title, text)) return 'job_search';
   for (const [pattern, category] of HUB_PATHS) if (pattern.test(path)) return category;
   const haystack = `${title}\n${text.slice(0, 6000)}`;
 

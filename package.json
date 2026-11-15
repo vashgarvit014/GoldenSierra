@@ -21,7 +21,8 @@
     "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup": "tsx scripts/setup-check.ts"
+    "setup": "tsx scripts/setup-check.ts",
+    "reclassify": "tsx scripts/reclassify.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",

@@ -12,7 +12,7 @@
   {
     "name": "does not dump a program list",
     "ok": true,
-    "detail": "98 words"
+    "detail": "88 words"
   },
   {
     "name": "speaks about \"she/they\", not \"you\"",
@@ -22,7 +22,7 @@
   {
     "name": "panel shows former foster youth",
     "ok": true,
-    "detail": "✓ | Young adult (16–24) | Population ; ✓ | Former foster youth | Population ; ✓ | Healthcare | Career pathway "
+    "detail": "New chat ; Young adult (16–24) ; Former foster youth ; Healthcare ; Needs GED / HiSET ; 19 years old ; 8 of 12"
   },
   {
     "name": "panel shows healthcare",
@@ -37,7 +37,7 @@
   {
     "name": "panel records Auburn and no transport",
     "ok": true,
-    "detail": "✓ | Auburn, Placer County — no transport | Geography"
+    "detail": "Auburn, Placer County — no transport"
   },
   {
     "name": "still only one question",
@@ -65,14 +65,14 @@
     "detail": "0 buttons"
   },
   {
-    "name": "See Results becomes available",
+    "name": "recommendations arrive without an extra step",
     "ok": true,
-    "detail": ""
+    "detail": "shown automatically"
   },
   {
     "name": "results show recommendation cards",
     "ok": true,
-    "detail": "6 cards"
+    "detail": "12 cards"
   },
   {
     "name": "no asserted eligibility",

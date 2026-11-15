@@ -120,7 +120,12 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
   // ── 3. Decide the single next question ──
   const ready = input.forceResults || readyForResults(context, matches, input.askedQuestions);
   const choice = ready ? null : selectNextQuestion(context, matches, input.askedQuestions);
-  const stage = input.forceResults ? 'results' : choice ? 'clarification' : 'ready_for_results';
+
+  // Once there is nothing useful left to ask, go straight to recommendations.
+  // An intermediate "I think I have enough" turn adds a round trip, says
+  // nothing, and reads as repetition when it happens twice — the brief asks
+  // for recommendations as soon as the information is there.
+  const stage: CounselorTurn['stage'] = choice ? 'clarification' : 'results';
 
   const askedQuestions = choice
     ? [...input.askedQuestions, choice.question.id]

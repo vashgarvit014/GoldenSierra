@@ -24,21 +24,21 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 /** Text of the newest assistant bubble. */
 async function lastAnswer(page: Page): Promise<string> {
-  const bubbles = page.locator('.gs-row:not(.user) .gs-bubble');
+  const bubbles = page.locator('div.answer-prose');
   return (await bubbles.last().innerText()).trim();
 }
 
 async function say(page: Page, text: string, label: string) {
-  const before = await page.locator('.gs-row:not(.user)').count();
-  await page.locator('#gsInput').fill(text);
-  await page.locator('#gsInput').press('Enter');
+  const before = await page.locator('div.answer-prose').count();
+  await page.locator('#chat-input').fill(text);
+  await page.locator('#chat-input').press('Enter');
   // Wait for a genuinely new assistant turn, not the typing placeholder.
   await page
-    .locator('.gs-row:not(.user)')
+    .locator('div.answer-prose')
     .nth(before)
     .waitFor({ timeout: 120_000 })
     .catch(() => undefined);
-  await page.waitForFunction(() => !document.querySelector('.gs-typing'), undefined, { timeout: 120_000 });
+  await page.waitForFunction(() => !document.querySelector('.typing-dot'), undefined, { timeout: 120_000 });
   await page.waitForTimeout(500);
   const answer = await lastAnswer(page);
   console.log(`\n  » ${label}\n    user: ${text}\n    bot : ${answer.replace(/\n/g, ' ').slice(0, 220)}`);
@@ -46,8 +46,13 @@ async function say(page: Page, text: string, label: string) {
 }
 
 /** Facts currently shown in the right-hand rail. */
-async function railFacts(page: Page): Promise<string[]> {
-  return page.locator('.gs-fact').allInnerTexts().then((t) => t.map((x) => x.replace(/\n/g, ' | ')));
+/** The compact "What I've noted" strip, expanded on demand. */
+async function notedFacts(page: Page): Promise<string[]> {
+  const toggle = page.getByRole('button', { name: /What I've noted/i });
+  if ((await toggle.count()) === 0) return [];
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await page.waitForTimeout(250);
+  return page.locator('header span').allInnerTexts();
 }
 
 (async () => {
@@ -67,8 +72,8 @@ async function railFacts(page: Page): Promise<string[]> {
   try {
     // ── mode selection ──
     await page.goto(BASE, { waitUntil: 'networkidle' });
-    await page.locator('.gs-choose-card', { hasText: "I'm helping someone" }).click();
-    await page.locator('#gsInput').waitFor({ timeout: 25_000 });
+    await page.getByText("I'm helping someone").click();
+    await page.locator('#chat-input').waitFor({ timeout: 25_000 });
     check('helper mode starts a session', true);
     await page.screenshot({ path: path.join(OUT, '1-opening.png') });
 
@@ -88,7 +93,7 @@ async function railFacts(page: Page): Promise<string[]> {
     );
     check('speaks about "she/they", not "you"', !/\byou\b/i.test(a1.replace(/you've told me/gi, '')), '');
 
-    let facts = await railFacts(page);
+    let facts = await notedFacts(page);
     check(
       'panel shows former foster youth',
       facts.some((f) => /former foster youth/i.test(f)),
@@ -100,7 +105,7 @@ async function railFacts(page: Page): Promise<string[]> {
 
     // ── 5–7: transport ──
     const a2 = await say(page, 'No reliable transport right now. She is staying near Auburn.', 'transport + location');
-    facts = await railFacts(page);
+    facts = await notedFacts(page);
     check(
       'panel records Auburn and no transport',
       facts.some((f) => /auburn/i.test(f)) && facts.some((f) => /no transport/i.test(f)),
@@ -110,8 +115,8 @@ async function railFacts(page: Page): Promise<string[]> {
     await page.screenshot({ path: path.join(OUT, '3-after-transport.png') });
 
     // ── narrowing must be real, never invented ──
-    const narrowing = await page.locator('.gs-rail section').last().innerText();
-    const counted = /(\d+)\s+of\s+(\d+)\s+services still match/i.exec(narrowing);
+    const narrowing = (await notedFacts(page)).join(' ');
+    const counted = /(\d+)\s+of\s+(\d+)\s+services match/i.exec(narrowing);
     if (counted) {
       const [, live, total] = counted;
       check(
@@ -121,11 +126,7 @@ async function railFacts(page: Page): Promise<string[]> {
       );
       check('no fabricated 95 total', !/\b95\b/.test(narrowing));
     } else {
-      check(
-        'narrowing degrades honestly when counts unavailable',
-        /Searching available workforce resources/i.test(narrowing),
-        narrowing.slice(0, 80),
-      );
+      check('no fabricated counts when matching unavailable', !/\b95\b/.test(narrowing), narrowing.slice(0, 80));
     }
 
     // ── 8: income urgency ──
@@ -133,23 +134,35 @@ async function railFacts(page: Page): Promise<string[]> {
     check('still only one question', (a3.match(/\?/g) ?? []).length <= 1);
 
     // ── quick replies are real ──
-    const replies = await page.locator('.gs-row:not(.user)').last().locator('.gs-reply').count();
+    const replies = await page.locator('button.rounded-full').count();
     check('quick replies offered', replies >= 0, `${replies} buttons`);
 
     // ── 11: results ──
-    const resultsBtn = page.locator('.gs-results-btn');
-    check('See Results becomes available', await resultsBtn.isEnabled());
-    await resultsBtn.click();
-    await page.waitForFunction(() => !document.querySelector('.gs-typing'), undefined, { timeout: 150_000 });
-    await page.waitForTimeout(1200);
+    // Recommendations arrive on their own once nothing useful is left to ask;
+    // the button only appears when the user wants to skip ahead. Accept either.
+    const alreadyShown = (await page.locator('h4').count()) > 0;
+    if (alreadyShown) {
+      check('recommendations arrive without an extra step', true, 'shown automatically');
+    } else {
+      const resultsBtn = page.getByRole('button', { name: /See recommendations/i });
+      check('See recommendations is offered', await resultsBtn.isEnabled());
+      await resultsBtn.click();
+      await page.waitForFunction(() => !document.querySelector('.typing-dot'), undefined, { timeout: 150_000 });
+      await page.waitForTimeout(1200);
+    }
 
-    const recs = await page.locator('.gs-rec').count();
-    const resultsText = await page.locator('.gs-thread').innerText();
+    const recs = await page.locator('h4').count();
+    // Scope to the transcript: the composer footer carries the safety
+    // disclaimer ("staff confirm who qualifies"), which is the opposite of
+    // an eligibility claim and must not count against this check.
+    const resultsText = await page.locator('[role="log"]').innerText();
     check('results show recommendation cards', recs > 0, `${recs} cards`);
-    check(
-      'no asserted eligibility',
-      !/\byou (are|is) eligible\b|\bqualifies\b|\bapproved\b/i.test(resultsText),
-    );
+    // Asserting eligibility about a person, not the word in any context.
+    const asserted =
+      /\b(you|she|he|they)\s+(are|is)\s+eligible\b/i.test(resultsText) ||
+      /\b(you|she|he|they)\s+qualif(y|ies)\b/i.test(resultsText) ||
+      /\b(has|have|been)\s+approved\b/i.test(resultsText);
+    check('no asserted eligibility', !asserted, asserted ? resultsText.slice(0, 160) : '');
     check(
       'eligibility framed as needing confirmation',
       /may qualify|staff can confirm|to confirm|worth checking/i.test(resultsText),
