@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Head, useApi, useConsole } from '../Console';
 import { statusClass } from '@/lib/status';
+import { STAGES, type JobProgress, type StageId } from '@/lib/ingest/progress';
 import { relativeTime } from './Overview';
 
 type Source = {
@@ -10,13 +11,23 @@ type Source = {
   name: string;
   type: string;
   rootUrl: string | null;
-  status: string;
+  status: string; // source enabled/paused — not a crawl status
   documentCount: number;
   maxDepth: number;
   maxPages: number;
   respectRobots: boolean;
   excludePatterns: string[];
   lastCrawledAt: string | null;
+  documents: { indexed: number; failed: number; pending: number; archived: number };
+  retrieval: { state: 'ready' | 'partial' | 'not_ready'; chunks: number; vectors: number };
+  lastJob: {
+    id: string;
+    status: string;
+    type: string;
+    error: string | null;
+    errorCount: number;
+    progress: JobProgress | null;
+  } | null;
 };
 
 type Job = {
@@ -32,21 +43,38 @@ type Job = {
   chunksIndexed: number;
   errorCount: number;
   error: string | null;
+  log: { level: string; message: string; url?: string }[] | null;
+  progress: JobProgress | null;
+  startedAt: string | null;
+  finishedAt: string | null;
   createdAt: string;
 };
 
-const PIPELINE = [
-  { icon: '◎', label: 'Discover' },
-  { icon: '⇩', label: 'Extract' },
-  { icon: '▤', label: 'Chunk' },
-  { icon: '◇', label: 'Embed' },
-  { icon: '✓', label: 'Index' },
-];
-
 type QueueHealth = { enabled: boolean; waiting: number; active: number; workers: number };
 
+const STAGE_META: Record<StageId, { icon: string; label: string }> = {
+  discover: { icon: '◎', label: 'Discover' },
+  extract: { icon: '⇩', label: 'Extract' },
+  chunk: { icon: '▤', label: 'Chunk' },
+  embed: { icon: '◇', label: 'Embed' },
+  index: { icon: '✓', label: 'Index' },
+};
+
+const RETRIEVAL_LABEL = { ready: 'ready', partial: 'partial', not_ready: 'not ready' } as const;
+
+/** Server validation errors arrive as { error, issues: [{ path, message }] }. */
+function apiMessage(json: { error?: string; issues?: { path?: string; message?: string }[] }, fallback: string) {
+  const issues = (json.issues ?? [])
+    .map((i) => (i.path ? `${i.path}: ${i.message}` : i.message))
+    .filter(Boolean);
+  return issues.length ? issues.join(' · ') : (json.error ?? fallback);
+}
+
 export function Crawler() {
-  const { notify } = useConsole();
+  const { notify, role } = useConsole();
+  const canEdit = role === 'EDITOR' || role === 'ADMIN';
+  const canDelete = role === 'ADMIN';
+
   const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[] }>('/api/admin/sources');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [queue, setQueue] = useState<QueueHealth | null>(null);
@@ -56,29 +84,30 @@ export function Crawler() {
   const [name, setName] = useState('');
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  async function loadJobs() {
+  const loadJobs = useCallback(async () => {
     const res = await fetch('/api/admin/ingestion/status');
     if (!res.ok) return;
     const body = (await res.json()) as { jobs: Job[]; queue?: QueueHealth | null };
     setJobs(body.jobs);
     setQueue(body.queue ?? null);
-  }
+  }, []);
 
   useEffect(() => {
     void loadJobs();
-  }, []);
+  }, [loadJobs]);
 
-  // Poll only while something is running — an idle console should be quiet.
+  // Poll only while something is queued or running — an idle console is quiet.
   const active = jobs.some((j) => j.status === 'RUNNING' || j.status === 'QUEUED');
   useEffect(() => {
     if (active && !poll.current) {
       poll.current = setInterval(() => {
         void loadJobs();
         void reloadSources();
-      }, 3000);
+      }, 2000);
     } else if (!active && poll.current) {
       clearInterval(poll.current);
       poll.current = null;
+      void reloadSources(); // one last read so the table shows the final state
     }
     return () => {
       if (poll.current) {
@@ -86,7 +115,7 @@ export function Crawler() {
         poll.current = null;
       }
     };
-  }, [active, reloadSources]);
+  }, [active, loadJobs, reloadSources]);
 
   async function start(body: Record<string, unknown>, label: string) {
     setBusy(label);
@@ -98,9 +127,9 @@ export function Crawler() {
         body: JSON.stringify(body),
       });
       const json = (await res.json()) as { error?: string; mode?: string };
-      if (!res.ok) throw new Error(json.error ?? 'Could not start');
+      if (!res.ok) throw new Error(apiMessage(json, 'Could not start'));
       notify(json.mode === 'queued' ? 'Queued for the worker' : 'Running now — progress below');
-      await loadJobs();
+      await Promise.all([loadJobs(), reloadSources()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start');
     } finally {
@@ -113,31 +142,88 @@ export function Crawler() {
     setBusy('add');
     setError(null);
     try {
+      let label = name.trim();
+      if (!label) {
+        try {
+          label = new URL(url).hostname;
+        } catch {
+          throw new Error('Enter a full URL, starting with https://');
+        }
+      }
       const res = await fetch('/api/admin/sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name || new URL(url).hostname,
+          name: label,
           type: 'WEBSITE',
-          rootUrl: url,
+          rootUrl: url.trim(),
           maxPages: 150,
           maxDepth: 3,
           respectRobots: true,
           excludePatterns: ['/blog/document/', '/(es|ru|fa|uk)(/|$)', '/calendar(/|$)'],
+          startCrawl: true,
         }),
       });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error ?? 'Could not add the source');
-      notify('Source added');
+      const json = (await res.json()) as {
+        error?: string;
+        issues?: { path?: string; message?: string }[];
+        crawl?: { jobId?: string; mode?: string; error?: string } | null;
+      };
+      if (!res.ok) throw new Error(apiMessage(json, 'Could not add the source'));
+
+      if (json.crawl?.error) {
+        setError(`Source saved, but the first crawl could not be queued: ${json.crawl.error}`);
+      } else {
+        notify(json.crawl?.mode === 'queued' ? 'Source added — first crawl queued for the worker' : 'Source added — first crawl running');
+      }
       setUrl('');
       setName('');
-      await reloadSources();
+      await Promise.all([loadJobs(), reloadSources()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add the source');
     } finally {
       setBusy(null);
     }
   }
+
+  async function toggle(source: Source) {
+    const next = source.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED';
+    setBusy(`toggle:${source.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/sources/${source.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!res.ok) throw new Error(apiMessage(await res.json(), 'Could not update the source'));
+      notify(next === 'PAUSED' ? 'Source paused' : 'Source resumed');
+      await reloadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the source');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(source: Source) {
+    if (!window.confirm(`Remove "${source.name}"? Its ${source.documentCount} indexed documents stay in the knowledge base.`)) return;
+    setBusy(`delete:${source.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/sources/${source.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(apiMessage(await res.json(), 'Could not remove the source'));
+      notify('Source removed — its documents were kept');
+      await reloadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove the source');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // The pipeline panel follows the job that is live now, else the newest one.
+  const liveJob = jobs.find((j) => j.status === 'RUNNING') ?? jobs.find((j) => j.status === 'QUEUED') ?? jobs.find((j) => j.progress) ?? null;
 
   return (
     <>
@@ -146,58 +232,82 @@ export function Crawler() {
         title="Website Crawler"
         sub="Discover, extract and index approved Golden Sierra content."
         action={
-          <button
-            className="btn"
-            disabled={busy === 'reindex'}
-            onClick={() => void start({ type: 'REINDEX' }, 'reindex')}
-            title="Re-embed every document — needed after an embedding model change"
-          >
-            {busy === 'reindex' ? <span className="spin" /> : '↻'} &nbsp; Re-index all
-          </button>
+          canEdit ? (
+            <button
+              className="btn"
+              disabled={busy === 'reindex' || active}
+              onClick={() => void start({ type: 'REINDEX' }, 'reindex')}
+              title="Re-embed every document — needed after an embedding model change"
+            >
+              {busy === 'reindex' ? <span className="spin" /> : '↻'} &nbsp; Re-index all
+            </button>
+          ) : undefined
         }
       />
 
-      {error && <div className="err" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && (
+        <div className="err" role="alert" id="crawlerError" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
-      <div className="panel" style={{ marginBottom: 20 }}>
+      {canEdit && (
+        <div className="panel" style={{ marginBottom: 20 }}>
+          <div className="panel-head">
+            <h2>Add an authorized source</h2>
+            <span className="fine">Host must be allow-listed server-side</span>
+          </div>
+          <form className="crawler-form" onSubmit={addSource}>
+            <input
+              id="urlInput"
+              aria-label="Website URL"
+              type="url"
+              required
+              placeholder="https://goldensierra.com/"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+            <input
+              id="labelInput"
+              aria-label="Source label"
+              placeholder="Label (optional)"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{ maxWidth: 220 }}
+            />
+            <button className="btn primary" id="addSourceBtn" disabled={busy === 'add' || !url}>
+              {busy === 'add' ? <span className="spin" /> : '＋'} &nbsp; Add source &amp; crawl
+            </button>
+          </form>
+          <p className="info-note" style={{ marginTop: 10 }}>
+            Saving a source queues its first crawl automatically. The crawler respects robots.txt,
+            rate-limits itself, and never attempts to bypass a login. A host that is not in{' '}
+            <code>CRAWL_ALLOWED_HOSTS</code> is rejected by the server.
+          </p>
+        </div>
+      )}
+
+      <div className="panel" style={{ marginBottom: 20 }} id="pipelinePanel">
         <div className="panel-head">
-          <h2>Add an authorized source</h2>
-          <span className="fine">Host must be allow-listed server-side</span>
+          <h2>Pipeline{liveJob ? ` — ${liveJob.sourceName ?? liveJob.type.replace(/_/g, ' ').toLowerCase()}` : ''}</h2>
+          {liveJob ? <span className={statusClass(liveJob.status)}>{liveJob.status.toLowerCase()}</span> : <span className="fine">No crawl yet</span>}
         </div>
-        <form className="crawler-form" onSubmit={addSource}>
-          <input
-            id="urlInput"
-            aria-label="Website URL"
-            type="url"
-            required
-            placeholder="https://goldensierra.com/"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-          <input
-            aria-label="Source label"
-            placeholder="Label (optional)"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ maxWidth: 220 }}
-          />
-          <button className="btn primary" disabled={busy === 'add' || !url}>
-            {busy === 'add' ? <span className="spin" /> : '＋'} &nbsp; Add source
-          </button>
-        </form>
-        <p className="info-note" style={{ marginTop: 10 }}>
-          The crawler respects robots.txt, rate-limits itself, and never attempts to bypass a
-          login. A host that is not in <code>CRAWL_ALLOWED_HOSTS</code> is rejected here.
-        </p>
-
-        <div className="pipeline">
-          {PIPELINE.map((s) => (
-            <div className="pipeline-step" key={s.label}>
-              <span aria-hidden="true">{s.icon}</span>
-              {s.label}
-            </div>
-          ))}
+        <div className="queue-line" id="queueLine">
+          {queue === null ? (
+            <span>Queue status unavailable</span>
+          ) : !queue.enabled ? (
+            <span>No Redis — jobs run inside the web server process</span>
+          ) : (
+            <>
+              <span className={queue.workers > 0 ? 'status done' : 'status failed'}>
+                {queue.workers > 0 ? `worker online (${queue.workers})` : 'no worker running'}
+              </span>
+              <span>{queue.waiting} waiting</span>
+              <span>{queue.active} active</span>
+            </>
+          )}
         </div>
+        <StageRail job={liveJob} />
       </div>
 
       <div className="panel" style={{ marginBottom: 20 }}>
@@ -208,25 +318,25 @@ export function Crawler() {
 
         {!sourceData && <div className="empty">Loading…</div>}
         {sourceData?.sources.length === 0 && (
-          <div className="empty">No sources yet — add one above.</div>
+          <div className="empty">No sources yet{canEdit ? ' — add one above.' : '.'}</div>
         )}
 
         {!!sourceData?.sources.length && (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table" id="sourcesTable">
               <thead>
                 <tr>
                   <th>Source</th>
-                  <th>Documents</th>
-                  <th>Depth / Pages</th>
-                  <th>Last crawled</th>
-                  <th>Status</th>
-                  <th />
+                  <th title="Whether the source may be crawled">Source</th>
+                  <th title="Status of the most recent crawl job">Last crawl</th>
+                  <th title="Documents stored for this source and their indexing state">Documents</th>
+                  <th title="Whether this source's content is searchable right now">Retrieval</th>
+                  {canEdit && <th />}
                 </tr>
               </thead>
               <tbody id="sourceRows">
                 {sourceData.sources.map((s) => (
-                  <tr key={s.id}>
+                  <tr key={s.id} data-source-id={s.id}>
                     <td>
                       <b>{s.name}</b>
                       {s.rootUrl && (
@@ -235,29 +345,65 @@ export function Crawler() {
                           <span className="fine">{s.rootUrl}</span>
                         </>
                       )}
-                    </td>
-                    <td>{s.documentCount}</td>
-                    <td className="fine">
-                      {s.maxDepth} / {s.maxPages}
-                      {s.respectRobots && <> · robots ✓</>}
-                    </td>
-                    <td className="fine">
-                      {s.lastCrawledAt ? relativeTime(s.lastCrawledAt) : 'never'}
+                      <div className="fine">
+                        depth {s.maxDepth} · up to {s.maxPages} pages{s.respectRobots && ' · robots ✓'}
+                        {' · '}
+                        {s.lastCrawledAt ? `crawled ${relativeTime(s.lastCrawledAt)}` : 'never crawled'}
+                      </div>
+                      {s.lastJob?.status === 'FAILED' && s.lastJob.error && (
+                        <div className="err" style={{ marginTop: 6 }}>
+                          {s.lastJob.error}
+                        </div>
+                      )}
                     </td>
                     <td>
-                      <span className={statusClass(s.status)}>
-                        {s.status.toLowerCase()}
+                      <span className={statusClass(s.status)} data-testid="source-status">
+                        {s.status === 'ACTIVE' ? 'enabled' : s.status.toLowerCase()}
                       </span>
                     </td>
                     <td>
-                      <button
-                        className="btn primary"
-                        disabled={busy === s.id || active}
-                        onClick={() => void start({ type: 'CRAWL', sourceId: s.id }, s.id)}
-                      >
-                        {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; Crawl
-                      </button>
+                      {s.lastJob ? (
+                        <span className={statusClass(s.lastJob.status)} data-testid="crawl-status">
+                          {s.lastJob.status.toLowerCase()}
+                        </span>
+                      ) : (
+                        <span className="fine">none</span>
+                      )}
                     </td>
+                    <td className="fine" data-testid="doc-state">
+                      <b>{s.documents.indexed}</b> indexed
+                      {s.documents.pending > 0 && <> · {s.documents.pending} pending</>}
+                      {s.documents.failed > 0 && <> · {s.documents.failed} failed</>}
+                    </td>
+                    <td>
+                      <span className={statusClass(s.retrieval.state === 'not_ready' ? 'queued' : s.retrieval.state)} data-testid="retrieval-state">
+                        {RETRIEVAL_LABEL[s.retrieval.state]}
+                      </span>
+                      <div className="fine">{s.retrieval.vectors} / {s.retrieval.chunks} chunks</div>
+                    </td>
+                    {canEdit && (
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          <button
+                            className="btn primary"
+                            data-action="crawl"
+                            disabled={busy === s.id || active || s.status === 'PAUSED'}
+                            title={s.status === 'PAUSED' ? 'Resume the source to crawl it' : undefined}
+                            onClick={() => void start({ type: 'CRAWL', sourceId: s.id }, s.id)}
+                          >
+                            {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; Crawl
+                          </button>
+                          <button className="btn" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)}>
+                            {s.status === 'PAUSED' ? 'Resume' : 'Pause'}
+                          </button>
+                          {canDelete && (
+                            <button className="btn" disabled={busy === `delete:${s.id}`} onClick={() => void remove(s)}>
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -266,10 +412,10 @@ export function Crawler() {
         )}
       </div>
 
-      <div className="panel">
+      <div className="panel" id="jobsPanel">
         <div className="panel-head">
-          <h2>Ingestion Jobs</h2>
-          <span className="fine">{active ? 'Live — refreshing every 3s' : 'Idle'}</span>
+          <h2>Ingestion Jobs &amp; crawl history</h2>
+          <span className="fine">{active ? 'Live — refreshing every 2s' : 'Idle'}</span>
         </div>
 
         {/* Work waiting with nobody to consume it looks identical to work about
@@ -289,42 +435,79 @@ export function Crawler() {
         {jobs.length === 0 && <div className="empty">No jobs yet.</div>}
 
         {jobs.map((job) => {
-          const pct =
-            job.pagesDiscovered > 0
-              ? Math.min(100, Math.round((job.pagesProcessed / job.pagesDiscovered) * 100))
-              : job.status === 'COMPLETED'
-                ? 100
-                : 0;
+          const problems = (job.log ?? []).filter((l) => l.level === 'error' || l.level === 'warn');
           return (
-            <div className="retrieval-card" key={job.id}>
+            <div className="retrieval-card" key={job.id} data-job-id={job.id}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <b style={{ fontSize: 12 }}>
                   {job.sourceName ?? job.type.replace(/_/g, ' ').toLowerCase()}
+                  <span className="fine"> · {job.type.replace(/_/g, ' ').toLowerCase()}</span>
                 </b>
-                <span className={statusClass(job.status)}>
+                <span className={statusClass(job.status)} data-testid="job-status">
                   {job.status.toLowerCase()}
                 </span>
               </div>
 
-              {job.status === 'RUNNING' && (
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${pct}%` }} />
-                </div>
-              )}
+              <StageRail job={job} compact />
 
               <p className="tiny" style={{ marginTop: 8 }}>
-                {job.status === 'RUNNING'
-                  ? `${job.pagesProcessed} of ${job.pagesDiscovered} pages discovered…`
-                  : `${job.documentsCreated} new · ${job.documentsUpdated} updated · ${job.documentsSkipped} unchanged · ${job.chunksIndexed} chunks`}
+                {job.documentsCreated} new · {job.documentsUpdated} updated · {job.documentsSkipped} unchanged ·{' '}
+                {job.chunksIndexed} chunks
                 {job.errorCount > 0 && ` · ${job.errorCount} errors`}
                 {' · '}
                 {relativeTime(job.createdAt)}
               </p>
               {job.error && <div className="err" style={{ marginTop: 8 }}>{job.error}</div>}
+              {problems.length > 0 && (
+                <details className="job-errors">
+                  <summary>
+                    {problems.length} issue{problems.length === 1 ? '' : 's'} during this run
+                  </summary>
+                  <ul>
+                    {problems.slice(0, 20).map((p, i) => (
+                      <li key={i}>
+                        <b>{p.level}</b> {p.message}
+                        {p.url && <span className="fine"> — {p.url}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           );
         })}
       </div>
     </>
+  );
+}
+
+/** Five real stages; each reads the counters the backend wrote, never a timer. */
+function StageRail({ job, compact }: { job: Job | null; compact?: boolean }) {
+  const queued = job?.status === 'QUEUED';
+  return (
+    <div className={`pipeline${compact ? ' compact' : ''}`} data-testid="stage-rail">
+      {STAGES.map((id) => {
+        const stage = job?.progress?.stages[id];
+        const state = stage?.state ?? 'pending';
+        const total = stage?.total;
+        let counts = '—';
+        if (stage && (stage.state !== 'pending' || stage.done > 0)) {
+          if (stage.state === 'skipped') counts = 'nothing to do';
+          else if (id === 'discover') counts = `${stage.done} URLs`;
+          else if (id === 'extract') counts = `${stage.done}${total != null ? ` / ${total}` : ''} pages`;
+          else counts = `${stage.done}${total != null ? ` / ${total}` : ''} docs · ${stage.count} ${id === 'chunk' ? 'chunks' : 'vectors'}`;
+          if (stage.errors > 0) counts += ` · ${stage.errors} failed`;
+        } else if (queued) counts = 'waiting';
+        return (
+          <div className="pipeline-step" key={id} data-stage={id} data-state={state}>
+            <span aria-hidden="true">{STAGE_META[id].icon}</span>
+            {STAGE_META[id].label}
+            <span className="st">{state}</span>
+            {!compact && <span className="ct">{counts}</span>}
+            {compact && <span className="ct" style={{ fontSize: 11 }}>{counts}</span>}
+          </div>
+        );
+      })}
+    </div>
   );
 }

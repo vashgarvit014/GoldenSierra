@@ -7,12 +7,16 @@ export function statusClass(status: string): string {
     case 'COMPLETED':
     case 'INDEXED':
     case 'ACTIVE':
+    case 'READY':
       return 'status done';
     case 'RUNNING':
     case 'PROCESSING':
       return 'status running';
     case 'FAILED':
       return 'status failed';
+    case 'PAUSED':
+    case 'PARTIAL':
+      return 'status warn';
     case 'CANCELLED':
     case 'ARCHIVED':
       return 'status gray';

@@ -32,6 +32,14 @@ import { crawl, normalizeUrl, type CrawlTarget } from './crawler';
 import { fetchAndExtractPdf, extractPdfFromBuffer } from './pdf';
 import type { ExtractedPage } from './extract';
 import {
+  bumpStage,
+  initialProgress,
+  patchStage,
+  settleStages,
+  type JobProgress,
+  type StageId,
+} from './progress';
+import {
   STALE_RUN_MS,
   JobInFlightError,
   decideClaim,
@@ -78,9 +86,25 @@ class JobTracker {
     chunksIndexed: 0,
     errorCount: 0,
   };
+  readonly progress: JobProgress = initialProgress();
   private lastFlush = 0;
 
   constructor(readonly jobId: string) {}
+
+  /** Moves a stage between states; transitions are written out immediately. */
+  async stage(id: StageId, patch: Parameters<typeof patchStage>[2]) {
+    patchStage(this.progress, id, patch);
+    await this.flush(true);
+  }
+
+  /** Hooks for `indexDocument`: each call is one real unit of work finishing. */
+  indexHooks(): IndexHooks {
+    return {
+      onChunked: (n) => bumpStage(this.progress, 'chunk', { done: 1, count: n }),
+      onEmbedded: (n) => bumpStage(this.progress, 'embed', { done: 1, count: n }),
+      onIndexed: (n) => bumpStage(this.progress, 'index', { done: 1, count: n }),
+    };
+  }
 
   log(level: JobLogEntry['level'], message: string, url?: string) {
     // Cap retained entries so a large crawl cannot bloat the row.
@@ -96,7 +120,11 @@ class JobTracker {
     this.lastFlush = now;
     await prisma.ingestionJob.update({
       where: { id: this.jobId },
-      data: { ...this.counters, log: this.entries as unknown as Prisma.InputJsonValue },
+      data: {
+        ...this.counters,
+        log: this.entries as unknown as Prisma.InputJsonValue,
+        progress: this.progress as unknown as Prisma.InputJsonValue,
+      },
     }).catch((err) => logger.warn('Could not flush job progress', { jobId: this.jobId, err: String(err) }));
   }
 }
@@ -223,7 +251,16 @@ export async function upsertDocument(input: DocumentInput): Promise<UpsertOutcom
  * points that the next run — or `auditIndex` — reveals and step 4 removes.
  * At no point is the document unsearchable.
  */
-export async function indexDocument(documentId: string): Promise<{ chunks: number }> {
+export type IndexHooks = {
+  onChunked?: (chunks: number) => void;
+  onEmbedded?: (vectors: number) => void;
+  onIndexed?: (vectors: number) => void;
+};
+
+export async function indexDocument(
+  documentId: string,
+  hooks: IndexHooks = {},
+): Promise<{ chunks: number }> {
   const document = await prisma.document.findUnique({ where: { id: documentId } });
   if (!document) throw new Error(`Document ${documentId} not found`);
 
@@ -246,8 +283,11 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
     return { chunks: 0 };
   }
 
+  hooks.onChunked?.(chunks.length);
+
   // 1. Embed everything before changing anything.
   const vectors = await embedTexts(chunks.map((c) => c.content));
+  hooks.onEmbedded?.(vectors.length);
   const rows = chunks.map((chunk, i) => {
     const vector = vectors[i];
     if (!vector) throw new Error(`Missing embedding for chunk ${chunk.ordinal} of ${documentId}`);
@@ -330,6 +370,8 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
     );
     throw err;
   }
+
+  hooks.onIndexed?.(rows.length);
 
   // 4. The new content is live; retire everything else this document has in
   //    the index. If this fails the document is still correct — only stale
@@ -417,14 +459,21 @@ export async function runCrawlJob(jobId: string): Promise<void> {
 
   try {
     await ensureCollection();
+    await tracker.stage('discover', { state: 'running' });
 
     const summary = await crawl(target, {
       shouldStop: () => wasCancelled(jobId),
       onDiscovered: (count) => {
         tracker.counters.pagesDiscovered = count;
+        patchStage(tracker.progress, 'discover', { done: count, total: count });
+        patchStage(tracker.progress, 'extract', { total: count, state: 'running' });
       },
       onPage: async (result) => {
         tracker.counters.pagesProcessed++;
+        bumpStage(tracker.progress, 'extract', {
+          done: 1,
+          errors: result.ok ? 0 : 1,
+        });
 
         if (!result.ok) {
           tracker.log('error', result.reason, result.url);
@@ -462,16 +511,28 @@ export async function runCrawlJob(jobId: string): Promise<void> {
 
     tracker.log('info', `Crawl visited ${summary.visited} pages (${summary.failed} failed)`);
 
+    // Discovery and extraction are over; what remains is turning changed
+    // documents into searchable vectors.
+    patchStage(tracker.progress, 'discover', { state: 'completed' });
+    patchStage(tracker.progress, 'extract', {
+      state: tracker.progress.stages.extract.errors >= tracker.counters.pagesProcessed && tracker.counters.pagesProcessed > 0 ? 'failed' : 'completed',
+    });
+    for (const id of ['chunk', 'embed', 'index'] as const) {
+      patchStage(tracker.progress, id, { total: indexQueue.length, state: indexQueue.length ? 'running' : 'pending' });
+    }
+    await tracker.flush(true);
+
     // Index the changed pages after crawling, so embedding spend happens once
     // per document and network I/O is not interleaved with model calls.
     for (const documentId of indexQueue) {
       if (await wasCancelled(jobId)) break;
       try {
-        const { chunks } = await indexDocument(documentId);
+        const { chunks } = await indexDocument(documentId, tracker.indexHooks());
         tracker.counters.chunksIndexed += chunks;
       } catch (err) {
         const message = describeError(err, 500);
         tracker.log('error', `Indexing failed: ${message}`);
+        for (const id of ['chunk', 'embed', 'index'] as const) bumpStage(tracker.progress, id, { errors: 1 });
         await prisma.document.update({
           where: { id: documentId },
           data: { status: DocumentStatus.FAILED, failureReason: message },
@@ -484,7 +545,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
     for (const pdfUrl of summary.pdfLinks.slice(0, 50)) {
       if (await wasCancelled(jobId)) break;
       try {
-        const outcome = await ingestPdfFromUrl(pdfUrl, source.id);
+        const outcome = await ingestPdfFromUrl(pdfUrl, source.id, tracker.indexHooks());
         if (outcome.action === 'created') tracker.counters.documentsCreated++;
         else if (outcome.action === 'updated') tracker.counters.documentsUpdated++;
         else tracker.counters.documentsSkipped++;
@@ -495,6 +556,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
     }
 
     const cancelled = await wasCancelled(jobId);
+    settleStages(tracker.progress, cancelled ? 'failed' : 'completed');
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
@@ -512,6 +574,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
   } catch (err) {
     const message = describeError(err);
     tracker.log('error', message);
+    settleStages(tracker.progress, 'failed');
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
@@ -606,7 +669,11 @@ export async function ingestPdfUploadTracked(
   }
 }
 
-export async function ingestPdfFromUrl(url: string, sourceId?: string | null): Promise<UpsertOutcome> {
+export async function ingestPdfFromUrl(
+  url: string,
+  sourceId?: string | null,
+  hooks?: IndexHooks,
+): Promise<UpsertOutcome> {
   const pdf = await fetchAndExtractPdf(url);
   const outcome = await upsertDocument({
     url,
@@ -617,7 +684,7 @@ export async function ingestPdfFromUrl(url: string, sourceId?: string | null): P
     publishedAt: pdf.publishedAt,
   });
   if (outcome.action === 'created' || outcome.action === 'updated') {
-    await indexDocument(outcome.documentId);
+    await indexDocument(outcome.documentId, hooks);
   }
   return outcome;
 }
@@ -663,20 +730,29 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
     });
 
     tracker.counters.pagesDiscovered = documents.length;
+    // A re-index starts from documents already stored, so only these stages apply.
+    patchStage(tracker.progress, 'discover', { state: 'completed', done: documents.length, total: documents.length });
+    patchStage(tracker.progress, 'extract', { state: 'skipped' });
+    for (const id of ['chunk', 'embed', 'index'] as const) {
+      patchStage(tracker.progress, id, { total: documents.length, state: documents.length ? 'running' : 'skipped' });
+    }
+    await tracker.flush(true);
 
     for (const document of documents) {
       if (await wasCancelled(jobId)) break;
       try {
-        const { chunks } = await indexDocument(document.id);
+        const { chunks } = await indexDocument(document.id, tracker.indexHooks());
         tracker.counters.chunksIndexed += chunks;
         tracker.counters.documentsUpdated++;
       } catch (err) {
         tracker.log('error', `${document.title}: ${describeError(err, 500)}`);
+        for (const id of ['chunk', 'embed', 'index'] as const) bumpStage(tracker.progress, id, { errors: 1 });
       }
       tracker.counters.pagesProcessed++;
       await tracker.flush();
     }
 
+    settleStages(tracker.progress, 'completed');
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
@@ -688,6 +764,7 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
   } catch (err) {
     const message = describeError(err);
     tracker.log('error', message);
+    settleStages(tracker.progress, 'failed');
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },

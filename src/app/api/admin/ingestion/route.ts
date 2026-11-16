@@ -37,6 +37,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     const source = await prisma.knowledgeSource.findUnique({ where: { id: body.sourceId } });
     if (!source) throw notFound('Source not found');
     if (!source.rootUrl) throw badRequest('This source has no root URL to crawl');
+    if (source.status === 'PAUSED') throw badRequest('This source is paused. Resume it before crawling.');
 
     // Refuse to stack crawls on one source — concurrent crawls of the same
     // site race each other on the same document rows.

@@ -1,5 +1,7 @@
 import type { NextConfig } from 'next';
 
+import { LEGACY_REDIRECTS } from './src/components/console/routes';
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ['@prisma/client', 'bullmq', 'ioredis', 'unpdf'],
 
@@ -22,6 +24,14 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: { optimizePackageImports: ['lucide-react'] },
+  /** Retired admin URLs keep working. Temporary (307) so a later change is not cached by browsers. */
+  async redirects() {
+    return Object.entries(LEGACY_REDIRECTS).map(([source, destination]) => ({
+      source,
+      destination,
+      permanent: false,
+    }));
+  },
   async headers() {
     return [
       {

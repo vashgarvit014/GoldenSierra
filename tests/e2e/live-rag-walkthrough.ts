@@ -102,7 +102,7 @@ async function main() {
     record('dashboard stats', await statFor('Vectors in Qdrant'), true);
 
     // ── TASK 1: knowledge sources ──────────────────────────────────────
-    await page.goto(`${BASE}/admin/sources`, { waitUntil: 'networkidle' });
+    await page.goto(`${BASE}/admin/crawler`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Knowledge sources' }).waitFor({ timeout: 20_000 });
     await caption(page, 'TASK 1 — Knowledge Base Management: existing indexed sources', 2400);
     await page.screenshot({ path: path.join(OUT, '03-knowledge-sources.png') });

@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AdminRole, SourceType } from '@prisma/client';
+import { AdminRole, JobType, SourceType } from '@prisma/client';
 import { prisma } from '@/lib/db';
-import { badRequest, withErrorHandling } from '@/lib/errors';
+import { AppError, badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
 import { isHostAllowed } from '@/lib/ingest/crawler';
+import { CRAWLABLE_TYPES, sourceKey } from '@/lib/ingest/sources';
+import { createJob } from '@/lib/ingest/pipeline';
+import { enqueueJob, queueHealth } from '@/lib/ingest/queue';
+import { readProgress } from '@/lib/ingest/progress';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +24,8 @@ const CreateSchema = z.object({
   respectRobots: z.boolean().default(true),
   defaultCategory: z.string().max(60).optional(),
   recrawlCron: z.string().max(100).optional(),
+  /** Queue the first crawl as soon as the source is saved (default). */
+  startCrawl: z.boolean().default(true),
 });
 
 /** GET /api/admin/sources — list configured knowledge sources. */
@@ -34,8 +40,44 @@ export const GET = withErrorHandling(async () => {
     },
   });
 
+  // Document and vector state per source, read from the stores that hold them,
+  // so "indexed" and "retrievable" are facts rather than a job's say-so.
+  const [docStatus, chunkRows] = await Promise.all([
+    prisma.document.groupBy({ by: ['sourceId', 'status'], _count: { _all: true } }),
+    prisma.$queryRaw<Array<{ sourceId: string | null; chunks: bigint; vectors: bigint }>>`
+      SELECT d."sourceId" AS "sourceId", COUNT(*) AS chunks, COUNT(c."vectorId") AS vectors
+      FROM "DocumentChunk" c JOIN "Document" d ON d.id = c."documentId"
+      GROUP BY d."sourceId"`,
+  ]);
+
+  const docsFor = (id: string) => {
+    const by: Record<string, number> = {};
+    for (const row of docStatus) if (row.sourceId === id) by[row.status] = row._count._all;
+    const indexed = by.INDEXED ?? 0;
+    const failed = by.FAILED ?? 0;
+    const pending = Object.entries(by).reduce(
+      (n, [status, count]) => (status === 'INDEXED' || status === 'FAILED' || status === 'ARCHIVED' ? n : n + count),
+      0,
+    );
+    return { indexed, failed, pending, archived: by.ARCHIVED ?? 0 };
+  };
+  const retrievalFor = (id: string, docs: ReturnType<typeof docsFor>) => {
+    const row = chunkRows.find((r) => r.sourceId === id);
+    const chunks = Number(row?.chunks ?? 0);
+    const vectors = Number(row?.vectors ?? 0);
+    const state =
+      docs.indexed > 0 && vectors > 0 && vectors === chunks && docs.failed === 0 && docs.pending === 0
+        ? 'ready'
+        : vectors > 0
+          ? 'partial'
+          : 'not_ready';
+    return { state, chunks, vectors };
+  };
+
   return NextResponse.json({
-    sources: sources.map((s) => ({
+    sources: sources.map((s) => {
+      const docs = docsFor(s.id);
+      return {
       id: s.id,
       name: s.name,
       type: s.type,
@@ -49,10 +91,20 @@ export const GET = withErrorHandling(async () => {
       excludePatterns: s.excludePatterns,
       defaultCategory: s.defaultCategory,
       lastCrawledAt: s.lastCrawledAt?.toISOString() ?? null,
+      documents: docs,
+      retrieval: retrievalFor(s.id, docs),
       lastJob: s.jobs[0]
-        ? { id: s.jobs[0].id, status: s.jobs[0].status, type: s.jobs[0].type }
+        ? {
+            id: s.jobs[0].id,
+            status: s.jobs[0].status,
+            type: s.jobs[0].type,
+            error: s.jobs[0].error,
+            errorCount: s.jobs[0].errorCount,
+            progress: readProgress(s.jobs[0].progress),
+          }
         : null,
-    })),
+      };
+    }),
   });
 });
 
@@ -69,6 +121,10 @@ export const POST = withErrorHandling(async (request: Request) => {
     throw badRequest('A root URL is required for this source type');
   }
 
+  if (body.rootUrl && !/^https?:\/\//i.test(body.rootUrl)) {
+    throw badRequest('The source URL must start with http:// or https://');
+  }
+
   // The deployment-level allowlist is the final word on what may be crawled;
   // an admin cannot widen it from the dashboard.
   if (body.rootUrl && !isHostAllowed(body.rootUrl)) {
@@ -82,6 +138,24 @@ export const POST = withErrorHandling(async (request: Request) => {
       new RegExp(pattern);
     } catch {
       throw badRequest(`"${pattern}" is not a valid regular expression`);
+    }
+  }
+
+  // One site, one source — spelled differently or not.
+  const key = sourceKey(body.rootUrl);
+  if (key) {
+    const existing = await prisma.knowledgeSource.findMany({
+      where: { rootUrl: { not: null } },
+      select: { id: true, name: true, rootUrl: true },
+    });
+    const clash = existing.find((e) => sourceKey(e.rootUrl) === key);
+    if (clash) {
+      throw new AppError(
+        `This site is already a source: "${clash.name}" (${clash.rootUrl}).`,
+        409,
+        'duplicate_source',
+        { sourceId: clash.id },
+      );
     }
   }
 
@@ -103,5 +177,19 @@ export const POST = withErrorHandling(async (request: Request) => {
 
   await recordAudit(session.userId, 'create', 'KnowledgeSource', source.id, { name: source.name });
 
-  return NextResponse.json({ source }, { status: 201 });
+  // Queue the first crawl. The source row is already saved, so a failure here
+  // is reported alongside it rather than undoing the save.
+  let crawl: { jobId: string; mode: 'queued' | 'inline' } | { error: string } | null = null;
+  if (body.startCrawl && source.rootUrl && (CRAWLABLE_TYPES as readonly string[]).includes(body.type)) {
+    try {
+      const jobId = await createJob(JobType.CRAWL, source.id);
+      const { mode } = await enqueueJob(jobId);
+      await recordAudit(session.userId, 'start_ingestion', 'IngestionJob', jobId, { type: 'CRAWL', mode, trigger: 'source_created' });
+      crawl = { jobId, mode };
+    } catch (err) {
+      crawl = { error: err instanceof Error ? err.message : 'Could not queue the first crawl' };
+    }
+  }
+
+  return NextResponse.json({ source, crawl, queue: await queueHealth() }, { status: 201 });
 });

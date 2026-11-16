@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/ui';
 import { cn } from '@/lib/utils';
+import { ROUTES } from '@/components/console/routes';
 
 const LINKS = [
-  { href: '/admin', label: 'Console' },
-  { href: '/admin/sources', label: 'Sources' },
+  { href: ROUTES.overview, label: 'Console' },
+  { href: ROUTES.crawler, label: 'Sources' },
   { href: '/admin/programs', label: 'Programs' },
-  { href: '/admin/testing', label: 'Testing' },
-  { href: '/admin/config', label: 'AI config' },
+  { href: ROUTES.testing, label: 'Testing' },
+  { href: ROUTES.settings, label: 'AI config' },
 ];
 
 /**

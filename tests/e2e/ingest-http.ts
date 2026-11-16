@@ -60,6 +60,7 @@ async function pollJob(id: string, cookie: string, want: string, ms = 30000) {
 (async () => {
   const jobsAtStart = await prisma.ingestionJob.count();
   const docsAtStart = await prisma.document.count();
+  const sourcesAtStart = await prisma.knowledgeSource.count();
 
   // ── authentication & authorization ──
   check('POST /ingestion without a session → 401', (await postJson('/api/admin/ingestion', { type: 'PDF_INGEST', url: 'https://x.invalid/a.pdf' })).status === 401);
@@ -170,11 +171,44 @@ async function pollJob(id: string, cookie: string, want: string, ms = 30000) {
   check('crashed upload becomes FAILED when status is read', byId.get(crashed.id)?.status === 'FAILED' && /interrupted/i.test(byId.get(crashed.id)?.error ?? ''), JSON.stringify(byId.get(crashed.id)?.status));
   check('in-progress upload is left RUNNING', (await prisma.ingestionJob.findUniqueOrThrow({ where: { id: live.id } })).status === 'RUNNING');
 
+  // ── sources API: validation, duplicates, pause, auto-crawl contract ──
+  const srcName = `http-src-${RUN}`;
+  const mkSource = (body: object, ck = cookie) => postJson('/api/admin/sources', { name: srcName, type: 'WEBSITE', ...body }, ck);
+  const sourceIds: string[] = [];
+  check('source: unauthenticated → 401', (await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'http://127.0.0.1:4455/' })).status === 401);
+  check('source: VIEWER → 403', (await mkSource({ rootUrl: 'http://127.0.0.1:4455/' }, viewer)).status === 403);
+  const noHost = await mkSource({ rootUrl: 'https://not-authorized.example/' });
+  check('source: host not on the allowlist → 400 with a readable reason', noHost.status === 400 && /not authorized/i.test(noHost.body.error), JSON.stringify(noHost.body));
+  const badScheme = await mkSource({ rootUrl: 'ftp://127.0.0.1/' });
+  check('source: non-http scheme → 400', badScheme.status === 400, JSON.stringify(badScheme.body));
+  const shortName = await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'http://127.0.0.1:4455/' }, cookie);
+  check('source: schema errors come back as issues[]', shortName.status === 400 && Array.isArray(shortName.body.issues) && shortName.body.issues.length > 0, JSON.stringify(shortName.body));
+  const dupReal = await mkSource({ rootUrl: 'https://www.goldensierra.com' });
+  check('source: duplicate of an existing real source (www/trailing-slash variant) → 409', dupReal.status === 409 && dupReal.body.code === 'duplicate_source', JSON.stringify(dupReal.body));
+
+  const jobsBeforeSrc = await prisma.ingestionJob.count();
+  const created = await mkSource({ rootUrl: 'http://127.0.0.1:4455/', startCrawl: false });
+  check('source: created with startCrawl:false → 201 and NO job queued', created.status === 201 && created.body.crawl === null && (await prisma.ingestionJob.count()) === jobsBeforeSrc, JSON.stringify(created.body).slice(0, 200));
+  const srcId: string | undefined = created.body.source?.id;
+  if (srcId) {
+    sourceIds.push(srcId);
+    check('source: the same URL again → 409', (await mkSource({ rootUrl: 'http://127.0.0.1:4455' })).status === 409);
+    const list = (await call('/api/admin/sources', { cookie })).body.sources.find((x: any) => x.id === srcId);
+    check('source list exposes enabled-state, doc state and retrieval readiness separately', list?.status === 'ACTIVE' && list?.documents?.indexed === 0 && list?.retrieval?.state === 'not_ready' && list?.lastJob === null, JSON.stringify(list));
+    check('PATCH pause → 200', (await call(`/api/admin/sources/${srcId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'PAUSED' }), cookie })).status === 200);
+    const paused = await postJson('/api/admin/ingestion', { type: 'CRAWL', sourceId: srcId }, cookie);
+    check('crawling a paused source → 400 "paused"', paused.status === 400 && /paused/i.test(paused.body.error), JSON.stringify(paused.body));
+    check('…and no job was created for it', (await prisma.ingestionJob.count({ where: { sourceId: srcId } })) === 0);
+    check('VIEWER cannot delete a source → 403', (await call(`/api/admin/sources/${srcId}`, { method: 'DELETE', cookie: viewer })).status === 403);
+  }
+  for (const id of sourceIds) await call(`/api/admin/sources/${id}`, { method: 'DELETE', cookie });
+
   // ── cleanup (own rows only) ──
   for (const id of documentIds) await deleteByDocument(id).catch(() => undefined);
   await prisma.document.deleteMany({ where: { id: { in: [...documentIds] } } });
   await prisma.ingestionJob.deleteMany({ where: { id: { in: [...jobIds] } } });
   await prisma.adminUser.delete({ where: { id: viewerUser.id } });
+  check('cleanup restored source count', (await prisma.knowledgeSource.count()) === sourcesAtStart);
   check('cleanup restored job + document counts', (await prisma.ingestionJob.count()) === jobsAtStart && (await prisma.document.count()) === docsAtStart,
     `jobs ${await prisma.ingestionJob.count()}/${jobsAtStart} docs ${await prisma.document.count()}/${docsAtStart}`);
 

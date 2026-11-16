@@ -1,10 +1,8 @@
-import { AdminRole } from '@prisma/client';
-import { requireAdmin } from '@/lib/auth';
-import { TestConsole } from '@/components/admin/TestConsole';
+import type { Metadata } from 'next';
 
-export const dynamic = 'force-dynamic';
+export const metadata: Metadata = { title: 'RAG Testing Lab · Golden Sierra Admin' };
 
-export default async function TestingPage() {
-  await requireAdmin(AdminRole.VIEWER);
-  return <TestConsole />;
+/** Rendered by the console shell in the /admin layout; this file only claims the route. */
+export default function Page() {
+  return null;
 }

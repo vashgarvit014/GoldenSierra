@@ -1,6 +1,9 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { PAGE_NAMES, ROUTES, type PageId } from './routes';
 import { Overview } from './pages/Overview';
 import { ChatPage } from './pages/ChatPage';
 import { KnowledgeBase } from './pages/KnowledgeBase';
@@ -17,29 +20,13 @@ import { Logo } from '@/components/ui';
  * is preserved exactly; the difference is that every panel below is backed by
  * a real API call instead of hard-coded sample numbers.
  *
- * It stays a single client-side view (sections toggled by `.page.active`)
- * rather than separate routes, because that is how the prototype behaves —
- * switching tabs is instant and keeps chat state alive in the background.
+ * Every module has its own URL (see ./routes.ts). The /admin layout keeps this
+ * component mounted across them, so switching modules is instant and chat
+ * state stays alive in the background; the URL is the source of truth for
+ * which module is showing.
  */
 
-export type PageId =
-  | 'overview'
-  | 'chat'
-  | 'knowledge'
-  | 'crawler'
-  | 'testing'
-  | 'analytics'
-  | 'settings';
-
-const PAGE_NAMES: Record<PageId, string> = {
-  overview: 'Overview',
-  chat: 'AI Workforce Chat',
-  knowledge: 'Knowledge Base',
-  crawler: 'Website Crawler',
-  testing: 'RAG Testing Lab',
-  analytics: 'Analytics',
-  settings: 'Settings',
-};
+export type { PageId };
 
 const NAV: { group: string; items: { id: PageId; icon: string; label: string }[] }[] = [
   {
@@ -62,16 +49,16 @@ const NAV: { group: string; items: { id: PageId; icon: string; label: string }[]
 ];
 
 // ── Toast + navigation, shared with every page ──────────────────────────
-type ConsoleCtx = { notify: (msg: string) => void; go: (page: PageId) => void };
-const Ctx = createContext<ConsoleCtx>({ notify: () => {}, go: () => {} });
+type ConsoleCtx = { notify: (msg: string) => void; go: (page: PageId) => void; role: string };
+const Ctx = createContext<ConsoleCtx>({ notify: () => {}, go: () => {}, role: 'VIEWER' });
 export const useConsole = () => useContext(Ctx);
 
 export { statusClass } from '@/lib/status';
 
 export type AdminUser = { email: string; role: string; name?: string | null };
 
-export function Console({ user }: { user: AdminUser }) {
-  const [page, setPage] = useState<PageId>('overview');
+export function Console({ user, page }: { user: AdminUser; page: PageId }) {
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,11 +69,18 @@ export function Console({ user }: { user: AdminUser }) {
     toastTimer.current = setTimeout(() => setToast(null), 3600);
   }, []);
 
-  const go = useCallback((next: PageId) => {
-    setPage(next);
+  const go = useCallback(
+    (next: PageId) => {
+      router.push(ROUTES[next]);
+      setSidebarOpen(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    [router],
+  );
+
+  useEffect(() => {
     setSidebarOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+  }, [page]);
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -101,7 +95,7 @@ export function Console({ user }: { user: AdminUser }) {
       .join('') || 'AD';
 
   return (
-    <Ctx.Provider value={{ notify, go }}>
+    <Ctx.Provider value={{ notify, go, role: user.role }}>
       <div className="app">
         <div className={`scrim${sidebarOpen ? ' show' : ''}`} onClick={() => setSidebarOpen(false)} aria-hidden="true" />
         <aside className={`sidebar${sidebarOpen ? ' open' : ''}`} id="sidebar" aria-label="Console navigation">
@@ -115,17 +109,18 @@ export function Console({ user }: { user: AdminUser }) {
               <div className="nav-group">{section.group}</div>
               <nav className="nav">
                 {section.items.map((item) => (
-                  <button
+                  <Link
                     key={item.id}
+                    href={ROUTES[item.id]}
                     className={page === item.id ? 'active' : undefined}
-                    onClick={() => go(item.id)}
                     aria-current={page === item.id ? 'page' : undefined}
+                    onClick={() => setSidebarOpen(false)}
                   >
                     <span className="ico" aria-hidden="true">
                       {item.icon}
                     </span>{' '}
                     {item.label}
-                  </button>
+                  </Link>
                 ))}
               </nav>
             </div>
@@ -155,9 +150,10 @@ export function Console({ user }: { user: AdminUser }) {
               >
                 ☰
               </button>
-              <div className="breadcrumbs">
-                <span className="crumb-root">Workspace &nbsp; / &nbsp;</span><strong id="crumb">{PAGE_NAMES[page]}</strong>
-              </div>
+              <nav className="breadcrumbs" aria-label="Breadcrumb">
+                <Link href={ROUTES.overview} className="crumb-root">Workspace &nbsp; / &nbsp;</Link>
+                <strong id="crumb" aria-current="page">{PAGE_NAMES[page]}</strong>
+              </nav>
             </div>
             <div className="top-right">
               <span className="top-badge">

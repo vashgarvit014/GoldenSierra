@@ -91,7 +91,7 @@ async function audit(page: Page, name: string, width: number) {
 
     for (const [id, label] of [['chat', 'AI Workforce Chat'], ['knowledge', 'Knowledge Base'], ['crawler', 'Website Crawler'], ['testing', 'RAG Testing Lab'], ['analytics', 'Analytics'], ['settings', 'Settings']] as const) {
       if (width <= 700) await page.getByRole('button', { name: 'Toggle navigation' }).click();
-      await page.locator(`.nav button:has-text("${label}")`).first().click();
+      await page.locator(`.nav a:has-text("${label}")`).first().click();
       await page.waitForTimeout(1800);
       await audit(page, `console-${id}`, width);
       if (width === 1440) await page.screenshot({ path: `${OUT}/05-console-${id}-1440.png`, fullPage: id === 'crawler' ? false : false });
@@ -104,10 +104,10 @@ async function audit(page: Page, name: string, width: number) {
       await page.getByRole('button', { name: 'Toggle navigation' }).click().catch(() => undefined);
     }
 
-    for (const p of ['sources', 'programs', 'testing', 'config']) {
+    for (const p of ['crawler', 'programs', 'testing', 'settings']) {
       await page.goto(`${BASE}/admin/${p}`, { waitUntil: 'networkidle' });
       await audit(page, `admin-${p}`, width);
-      if (width === 1440 || (width === 375 && p === 'sources')) await page.screenshot({ path: `${OUT}/07-admin-${p}-${width}.png` });
+      if (width === 1440 || (width === 375 && p === 'crawler')) await page.screenshot({ path: `${OUT}/07-admin-${p}-${width}.png` });
     }
     await ctx.close();
   }

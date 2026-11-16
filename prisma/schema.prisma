@@ -238,6 +238,8 @@ model IngestionJob {
   errorCount       Int @default(0)
 
   log        Json?  // array of {level, message, url?, at}
+  /// Real per-stage telemetry (discover/extract/chunk/embed/index); see src/lib/ingest/progress.ts
+  progress   Json?
   error      String? @db.Text
   startedAt  DateTime?
   finishedAt DateTime?

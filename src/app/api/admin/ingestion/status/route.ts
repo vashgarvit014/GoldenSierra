@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/auth';
 import { auditIndex, failInterruptedUploads } from '@/lib/ingest/pipeline';
 import { collectionStats } from '@/lib/vector/qdrant';
 import { queueHealth } from '@/lib/ingest/queue';
+import { readProgress } from '@/lib/ingest/progress';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,6 +66,7 @@ function serializeJob(job: JobRow) {
     errorCount: job.errorCount,
     error: job.error,
     log: job.log,
+    progress: readProgress(job.progress),
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
     createdAt: job.createdAt.toISOString(),
