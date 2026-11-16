@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { Head, useApi, useConsole } from '../Console';
+import { statusClass } from '@/lib/status';
 import { relativeTime } from './Overview';
 
 type DocRow = {
@@ -265,6 +266,7 @@ export function KnowledgeBase() {
             }}
           >
             <input
+              aria-label="Search documents"
               placeholder="Search title or URL…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -312,7 +314,7 @@ export function KnowledgeBase() {
                         {d.failureReason && (
                           <>
                             <br />
-                            <span style={{ color: '#9c3434', fontSize: 11 }}>{d.failureReason}</span>
+                            <span style={{ color: 'var(--destructive-strong)', fontSize: 12 }}>{d.failureReason}</span>
                           </>
                         )}
                       </td>
@@ -323,7 +325,7 @@ export function KnowledgeBase() {
                           onChange={(e) =>
                             void patch(d.id, { audience: e.target.value }, `${d.title} → ${e.target.value}`)
                           }
-                          style={{ height: 32, borderRadius: 7, border: '1px solid #dce4eb', padding: '0 7px', fontSize: 11 }}
+                          aria-label={`Audience for ${d.title}`}
                         >
                           {AUDIENCES.filter(Boolean).map((a) => (
                             <option key={a} value={a}>
@@ -337,11 +339,7 @@ export function KnowledgeBase() {
                       </td>
                       <td>{d.chunkCount}</td>
                       <td>
-                        <span
-                          className={`status${
-                            d.status === 'INDEXED' ? '' : d.status === 'FAILED' ? ' warn' : ' gray'
-                          }`}
-                        >
+                        <span className={statusClass(d.status)}>
                           {d.status.toLowerCase()}
                         </span>
                       </td>

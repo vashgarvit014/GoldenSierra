@@ -22,32 +22,32 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
     recommendation.exclusions.length > 0;
 
   return (
-    <div className="bg-surface border border-default rounded-xl overflow-hidden">
+    <div className="overflow-hidden rounded-card border border-border bg-surface">
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h4 className="font-semibold text-sm leading-snug">{recommendation.name}</h4>
+            <h4 className="text-base font-bold leading-snug text-accent">{recommendation.name}</h4>
             {recommendation.category && (
-              <p className="text-xs text-muted mt-0.5">{recommendation.category}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{recommendation.category}</p>
             )}
           </div>
           {recommendation.requiresVerification && (
-            <Badge tone="warning" className="shrink-0">
+            <Badge tone="accent" className="shrink-0">
               <Info className="h-3 w-3" aria-hidden="true" />
               Staff confirm
             </Badge>
           )}
         </div>
 
-        <p className="text-sm mt-2 leading-relaxed">{recommendation.shortDescription}</p>
+        <p className="mt-2 text-sm leading-relaxed">{recommendation.shortDescription}</p>
 
-        <p className="text-xs text-muted mt-2">
-          <span className="font-medium text-[var(--text)]">Why this fits: </span>
+        <p className="mt-2 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">Why this fits: </span>
           {recommendation.whyRelevant}
         </p>
 
         {recommendation.exclusions.length > 0 && (
-          <p className="text-xs mt-2 text-gold-700">
+          <p className="mt-2 text-xs text-warning-strong">
             <span className="font-medium">Worth checking: </span>
             {recommendation.exclusions.join('; ')}
           </p>
@@ -59,7 +59,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
               href={recommendation.officialUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-medium text-sierra-700 hover:underline dark:text-sierra-300"
+              className="inline-flex items-center gap-1 text-xs font-semibold link"
             >
               Official page
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -68,7 +68,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
           {recommendation.contactPhone && (
             <a
               href={`tel:${recommendation.contactPhone.replace(/\D/g, '')}`}
-              className="inline-flex items-center gap-1 text-xs font-medium text-sierra-700 hover:underline dark:text-sierra-300"
+              className="inline-flex items-center gap-1 text-xs font-semibold link"
             >
               <Phone className="h-3 w-3" aria-hidden="true" />
               {recommendation.contactPhone}
@@ -79,7 +79,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
               type="button"
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
-              className="inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-[var(--text)] ml-auto"
+              className="inline-flex items-center gap-1 ml-auto text-xs font-semibold text-muted-foreground hover:text-foreground"
             >
               {expanded ? 'Less' : 'Details'}
               <ChevronDown
@@ -92,14 +92,14 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
       </div>
 
       {expanded && hasDetail && (
-        <div className="border-t border-default bg-surface-muted px-4 py-3 space-y-3">
+        <div className="space-y-3 border-t border-border bg-muted px-4 py-3">
           {recommendation.eligibility.length > 0 && (
             <div>
-              <p className="text-xs font-semibold mb-1.5">Published requirements</p>
+              <p className="text-xs font-bold mb-1.5">Published requirements</p>
               <ul className="space-y-1.5">
                 {recommendation.eligibility.map((rule, i) => (
-                  <li key={i} className="text-xs text-muted flex gap-2">
-                    <span aria-hidden="true" className="text-sierra-500">•</span>
+                  <li key={i} className="flex gap-2 text-xs text-muted-foreground">
+                    <span aria-hidden="true" className="text-accent">•</span>
                     <span>
                       {rule.description}
                       {rule.sourceUrl && (
@@ -109,7 +109,7 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
                             href={rule.sourceUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-sierra-600 hover:underline dark:text-sierra-300"
+                            className="link"
                           >
                             (source)
                           </a>
@@ -124,13 +124,13 @@ export function RecommendationCard({ recommendation }: { recommendation: Recomme
 
           {recommendation.nextSteps && (
             <div>
-              <p className="text-xs font-semibold mb-1">How to start</p>
-              <p className="text-xs text-muted leading-relaxed">{recommendation.nextSteps}</p>
+              <p className="text-xs font-bold mb-1">How to start</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">{recommendation.nextSteps}</p>
             </div>
           )}
 
           {recommendation.requiresVerification && (
-            <p className="text-xs text-muted italic">
+            <p className="text-xs italic text-muted-foreground">
               Golden Sierra staff decide who is eligible. This is a possible match, not a decision.
             </p>
           )}

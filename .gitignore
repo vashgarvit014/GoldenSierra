@@ -19,3 +19,6 @@ test-artifacts/*.mp4
 test-artifacts/*.png
 .env.vercel-pulled
 logs/
+
+.tmp/
+test-artifacts/theme/

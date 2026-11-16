@@ -301,3 +301,10 @@ describe('criteriaFor', () => {
     expect(c.find((x) => x.key === 'incomeUrgency')!.applied).toBe(false);
   });
 });
+
+describe('ruleExtract transportation', () => {
+  it('reads "no reliable transport" as none, which the model may not override', () => {
+    const out = ruleExtract('No reliable transport right now. She is staying near Auburn.', base());
+    expect(out.transportation).toBe('none');
+  });
+});

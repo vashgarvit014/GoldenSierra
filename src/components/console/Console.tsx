@@ -8,6 +8,7 @@ import { Crawler } from './pages/Crawler';
 import { TestingLab } from './pages/TestingLab';
 import { Analytics } from './pages/Analytics';
 import { Settings } from './pages/Settings';
+import { Logo } from '@/components/ui';
 
 /**
  * The console shell.
@@ -65,6 +66,8 @@ type ConsoleCtx = { notify: (msg: string) => void; go: (page: PageId) => void };
 const Ctx = createContext<ConsoleCtx>({ notify: () => {}, go: () => {} });
 export const useConsole = () => useContext(Ctx);
 
+export { statusClass } from '@/lib/status';
+
 export type AdminUser = { email: string; role: string; name?: string | null };
 
 export function Console({ user }: { user: AdminUser }) {
@@ -100,13 +103,11 @@ export function Console({ user }: { user: AdminUser }) {
   return (
     <Ctx.Provider value={{ notify, go }}>
       <div className="app">
-        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`} id="sidebar">
+        <div className={`scrim${sidebarOpen ? ' show' : ''}`} onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+        <aside className={`sidebar${sidebarOpen ? ' open' : ''}`} id="sidebar" aria-label="Console navigation">
           <div className="brand">
-            <div className="brand-mark">✦</div>
-            <div>
-              <div className="brand-name">Golden Sierra</div>
-              <div className="brand-sub">WORKFORCE NAVIGATOR</div>
-            </div>
+            <Logo onInk className="brand-logo" />
+            <div className="brand-sub">WORKFORCE NAVIGATOR</div>
           </div>
 
           {NAV.map((section) => (
@@ -149,11 +150,13 @@ export function Console({ user }: { user: AdminUser }) {
                 className="mobile-toggle"
                 onClick={() => setSidebarOpen((v) => !v)}
                 aria-label="Toggle navigation"
+                aria-expanded={sidebarOpen}
+                aria-controls="sidebar"
               >
                 ☰
               </button>
               <div className="breadcrumbs">
-                Workspace &nbsp; / &nbsp; <strong id="crumb">{PAGE_NAMES[page]}</strong>
+                <span className="crumb-root">Workspace &nbsp; / &nbsp;</span><strong id="crumb">{PAGE_NAMES[page]}</strong>
               </div>
             </div>
             <div className="top-right">

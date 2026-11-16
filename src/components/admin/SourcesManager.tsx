@@ -139,7 +139,7 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner /> Loading sources…
       </div>
     );
@@ -152,8 +152,8 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-lg font-semibold">Knowledge sources</h1>
-          <p className="text-sm text-muted">
+          <h1 className="display text-3xl text-foreground">Knowledge sources</h1>
+          <p className="text-sm text-muted-foreground">
             Only hosts listed in <code className="font-mono text-xs">CRAWL_ALLOWED_HOSTS</code> can
             be indexed.
           </p>
@@ -183,7 +183,7 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
       <div className="space-y-3">
         {sources.length === 0 && (
           <Card>
-            <CardContent className="pt-5 text-sm text-muted">
+            <CardContent className="pt-5 text-sm text-muted-foreground">
               No sources configured. Run <code className="font-mono">npm run db:seed</code> to add
               the Golden Sierra defaults, or add one above.
             </CardContent>
@@ -206,21 +206,21 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
                       href={source.rootUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-sierra-700 hover:underline dark:text-sierra-300"
+                      className="text-xs link"
                     >
                       {source.rootUrl}
                     </a>
                   )}
-                  <p className="mt-1 text-xs text-muted">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {source.documentCount} documents · depth {source.maxDepth} · max{' '}
                     {source.maxPages} pages ·{' '}
                     {source.respectRobots ? 'respects robots.txt' : 'robots.txt ignored'}
                   </p>
-                  <p className="text-xs text-muted">
+                  <p className="text-xs text-muted-foreground">
                     Last crawled {relativeTime(source.lastCrawledAt)}
                   </p>
                   {source.excludePatterns.length > 0 && (
-                    <p className="mt-1 font-mono text-[11px] text-muted">
+                    <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                       excludes: {source.excludePatterns.join('  ')}
                     </p>
                   )}
@@ -244,7 +244,7 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
                       disabled={busy === source.id}
                       onClick={() => void removeSource(source.id, source.name)}
                     >
-                      <Trash2 className="h-3.5 w-3.5 text-red-600" aria-hidden="true" />
+                      <Trash2 className="h-3.5 w-3.5 text-destructive-strong" aria-hidden="true" />
                     </Button>
                   </div>
                 )}
@@ -260,7 +260,7 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
         </CardHeader>
         <CardContent>
           {jobs.length === 0 ? (
-            <p className="text-sm text-muted">No jobs yet.</p>
+            <p className="text-sm text-muted-foreground">No jobs yet.</p>
           ) : (
             <ul className="divide-y divide-[var(--border)]">
               {jobs.map((job) => (
@@ -269,13 +269,13 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
                     <p className="truncate font-medium">
                       {job.sourceName ?? job.type.replace(/_/g, ' ').toLowerCase()}
                     </p>
-                    <p className="text-xs text-muted">
+                    <p className="text-xs text-muted-foreground">
                       {job.status === 'RUNNING'
                         ? `${job.pagesProcessed} of ${job.pagesDiscovered} pages…`
                         : `${job.documentsCreated} new · ${job.documentsUpdated} updated · ${job.documentsSkipped} unchanged · ${job.chunksIndexed} chunks`}
                       {job.errorCount > 0 && ` · ${job.errorCount} errors`}
                     </p>
-                    {job.error && <p className="mt-0.5 text-xs text-red-600">{job.error}</p>}
+                    {job.error && <p className="mt-0.5 text-xs text-destructive-strong">{job.error}</p>}
                   </div>
                   <div className="shrink-0 text-right">
                     <Badge
@@ -291,7 +291,7 @@ export function SourcesManager({ canEdit }: { canEdit: boolean }) {
                     >
                       {job.status.toLowerCase()}
                     </Badge>
-                    <p className="mt-0.5 text-xs text-muted">{relativeTime(job.createdAt)}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{relativeTime(job.createdAt)}</p>
                   </div>
                 </li>
               ))}
@@ -431,7 +431,7 @@ function UploadPdf({ onDone }: { onDone: () => void }) {
     <Card>
       <CardHeader>
         <CardTitle>Upload a PDF</CardTitle>
-        <p className="mt-1 text-xs text-muted">
+        <p className="mt-1 text-xs text-muted-foreground">
           Text is extracted and indexed immediately. Scanned PDFs with no text layer are rejected.
         </p>
       </CardHeader>
@@ -440,16 +440,17 @@ function UploadPdf({ onDone }: { onDone: () => void }) {
           <input
             ref={inputRef}
             type="file"
+            aria-label="PDF file to upload"
             accept="application/pdf,.pdf"
             disabled={busy}
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) void upload(file);
             }}
-            className="block text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-sierra-700 file:px-3 file:py-1.5 file:text-sm file:text-white hover:file:bg-sierra-800"
+            className="block text-sm file:mr-3 file:rounded-pill file:border-2 file:border-foreground file:bg-primary file:px-4 file:py-1.5 file:text-sm file:font-bold file:text-primary-foreground hover:file:bg-primary-hover"
           />
           {busy && (
-            <span className="flex items-center gap-1.5 text-sm text-muted">
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Spinner />
               <Upload className="h-3.5 w-3.5" aria-hidden="true" />
               Extracting…

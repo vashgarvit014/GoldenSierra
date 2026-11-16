@@ -265,8 +265,9 @@ export function buildKnownFacts(ctx: CounselorContext, pendingLabel?: string): K
 }
 
 /**
- * Interpretations worth surfacing. Each one is shown in the "Assuming from
- * what you've told me" box so it can be corrected before it influences advice.
+ * Interpretations the engine is relying on. Kept internal — the UI no longer
+ * shows them as a separate notice; eligibility caveats appear on each
+ * recommendation instead.
  */
 export function buildAssumptions(ctx: CounselorContext, matches: ProgramMatch[]): Assumption | null {
   if (ctx.population.includes('former_foster_youth') && (ctx.age ?? 99) <= 24) {

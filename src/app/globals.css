@@ -1,106 +1,255 @@
 @import 'tailwindcss';
 
 /*
- * Design tokens.
+ * Golden Sierra design tokens.
  *
- * The palette is an original implementation — deep evergreen and warm gold
- * evoke the Sierra foothills the agency serves. No logo, brand asset, or
- * stylesheet from goldensierra.com is copied; only publicly stated facts
- * (service names, contact details) appear anywhere in this project.
+ * The single source of truth for colour, type, radius and elevation. Every
+ * surface in the product — the public assistant, its recommendations, and the
+ * admin console — reads these. Nothing downstream hard-codes a colour.
+ *
+ * Reference: https://goldensierra.com/about and https://goldensierra.com/
+ * (inspected November 2026). "Verified" values were read from the site's own
+ * theme presets and from computed styles in a real browser. "Approximation"
+ * values are ours — the site does not define them — and are marked as such so
+ * nobody mistakes them for official brand colours.
  */
-@theme {
-  --color-sierra-50:  oklch(0.97 0.015 155);
-  --color-sierra-100: oklch(0.94 0.030 155);
-  --color-sierra-200: oklch(0.88 0.055 155);
-  --color-sierra-300: oklch(0.79 0.080 155);
-  --color-sierra-400: oklch(0.68 0.100 155);
-  --color-sierra-500: oklch(0.58 0.110 155);
-  --color-sierra-600: oklch(0.48 0.100 155);
-  --color-sierra-700: oklch(0.39 0.082 155);
-  --color-sierra-800: oklch(0.31 0.062 155);
-  --color-sierra-900: oklch(0.24 0.045 155);
-
-  --color-gold-100: oklch(0.95 0.045 85);
-  --color-gold-300: oklch(0.85 0.110 82);
-  --color-gold-500: oklch(0.74 0.140 78);
-  --color-gold-600: oklch(0.64 0.130 72);
-  --color-gold-700: oklch(0.52 0.110 68);
-
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-}
 
 :root {
-  --background: oklch(0.99 0.004 150);
-  --surface: oklch(1 0 0);
-  --surface-muted: oklch(0.975 0.006 150);
-  --border: oklch(0.90 0.010 150);
-  --text: oklch(0.22 0.015 150);
-  --text-muted: oklch(0.50 0.015 150);
+  /* ── Brand primitives — verified ─────────────────────────────────────── */
+  --gs-gold: #ffc425;           /* preset "primary": hero, primary buttons, header links */
+  --gs-gold-hover: #ffbc08;     /* primary button :hover */
+  --gs-gold-active: #f8b500;    /* primary button :active */
+  --gs-charcoal: #231f20;       /* preset "default": text, header, footer, button borders */
+  --gs-dark: #333333;           /* preset "dark": text inside sections */
+  --gs-tobacco: #6e5740;        /* preset "tobacco" / "links": headings, links, outline buttons */
+  --gs-tobacco-hover: #5e4a36;
+  --gs-tobacco-active: #524130;
+  --gs-tobacco-light: #a28160;  /* form-control focus border */
+  --gs-canvas: #f0eeeb;         /* preset "light": section backgrounds */
+  --gs-canvas-hover: #dcd7d0;   /* light button :hover */
+  --gs-canvas-active: #d1cbc2;  /* light button :active */
+  --gs-white: #ffffff;
+  --gs-success: #28a745;        /* preset "success" */
+  --gs-danger: #dc3545;         /* preset "danger" */
+  --gs-warning: #ffc107;        /* preset "warning" */
+  --gs-info: #00a0cd;           /* preset "info" */
+
+  /* ── Approximations — ours, not tokens on the official site ───────────── */
+  --gs-cream: #fff3e6;          /* sampled from the official video poster artwork */
+
+  /* ── Semantic tokens — what components actually use ───────────────────── */
+  --background: var(--gs-white);
+  --foreground: var(--gs-charcoal);
+  --surface: var(--gs-white);
+  --surface-foreground: var(--gs-charcoal);
+  --muted: var(--gs-canvas);
+  --muted-hover: var(--gs-canvas-hover);
+  --muted-active: var(--gs-canvas-active);
+  /* Approximation: the site's secondary grey (#6c757d) is 4.05:1 on the
+     canvas, short of AA. This warm grey clears 4.5:1 on white and canvas. */
+  --muted-foreground: #5f5955;
+  --border: var(--gs-canvas-hover);
+  /* Control outlines must reach 3:1 against their background (WCAG 1.4.11).
+     The site's resting input border (#ced4da) does not; its focus border does. */
+  --input: var(--gs-tobacco-light);
+  --focus: var(--gs-charcoal);
+
+  --primary: var(--gs-gold);
+  --primary-hover: var(--gs-gold-hover);
+  --primary-active: var(--gs-gold-active);
+  --primary-foreground: var(--gs-charcoal);
+
+  --accent: var(--gs-tobacco);
+  --accent-hover: var(--gs-tobacco-hover);
+  --accent-active: var(--gs-tobacco-active);
+  --accent-foreground: var(--gs-white);
+  --accent-soft: var(--gs-cream);
+
+  /* The charcoal surfaces: header, footer, sidebar, the user's own messages. */
+  --ink: var(--gs-charcoal);
+  --ink-foreground: var(--gs-white);
+  --ink-muted: #c9c4c1;         /* approximation: secondary text on charcoal */
+  --ink-border: #454041;        /* approximation: hairline on charcoal */
+  --ink-raised: #322d2e;        /* approximation: hover / active fill on charcoal */
+
+  /* Status. The solid hues are the site's presets; the soft / strong / border
+     shades are approximations derived from them so that text set on a tint
+     clears AA — white on the solid success and info hues does not. */
+  --success: var(--gs-success);
+  --success-soft: #eaf6ed;
+  --success-strong: #1c6b31;
+  --success-border: #b7dec0;
+
+  --warning: var(--gs-warning);
+  --warning-soft: #fff6d9;
+  --warning-strong: #6a4c00;
+  --warning-border: #efd58a;
+
+  --destructive: var(--gs-danger);
+  --destructive-foreground: var(--gs-white);
+  --destructive-hover: #d12435; /* verified: danger button :hover */
+  --destructive-soft: #fdeced;
+  --destructive-strong: #af1e2c; /* verified: danger text :active */
+  --destructive-border: #f1bbc1;
+
+  --info: var(--gs-info);
+  --info-soft: #e6f5fa;
+  --info-strong: #005f7a;
+  --info-border: #a8dbea;
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --duration: 0.15s;            /* verified: button transition */
+  --ease: ease-in-out;
+
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --background: oklch(0.17 0.012 155);
-    --surface: oklch(0.21 0.015 155);
-    --surface-muted: oklch(0.25 0.015 155);
-    --border: oklch(0.32 0.018 155);
-    --text: oklch(0.95 0.008 150);
-    --text-muted: oklch(0.72 0.012 150);
-    color-scheme: dark;
-  }
+/*
+ * Tailwind reads the semantic tokens, so `bg-primary`, `text-muted-foreground`,
+ * `border-border`, `rounded-card` and friends all resolve to the values above.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-muted: var(--muted);
+  --color-muted-hover: var(--muted-hover);
+  --color-muted-active: var(--muted-active);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-focus: var(--focus);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-border: var(--ink-border);
+  --color-ink-raised: var(--ink-raised);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-strong: var(--success-strong);
+  --color-success-border: var(--success-border);
+
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-strong: var(--warning-strong);
+  --color-warning-border: var(--warning-border);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-strong: var(--destructive-strong);
+  --color-destructive-border: var(--destructive-border);
+
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-strong: var(--info-strong);
+  --color-info-border: var(--info-border);
+
 }
 
-:root[data-theme='dark'] {
-  --background: oklch(0.17 0.012 155);
-  --surface: oklch(0.21 0.015 155);
-  --surface-muted: oklch(0.25 0.015 155);
-  --border: oklch(0.32 0.018 155);
-  --text: oklch(0.95 0.008 150);
-  --text-muted: oklch(0.72 0.012 150);
-  color-scheme: dark;
+/*
+ * Type, shape and elevation. `static` so the variables are always emitted —
+ * the admin console stylesheet reads them directly, outside Tailwind.
+ */
+@theme static {
+  /* Verified: the site's stack is `Barlow, system-ui, "Segoe UI", sans-serif`,
+     loaded at 400 / 700 / 900. 500 and 600 are added for dense admin labels. */
+  --font-sans: var(--font-barlow), system-ui, 'Segoe UI', sans-serif;
+  --font-mono: SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  --radius-control: 0.25rem;    /* verified: inputs, tags, the button base */
+  --radius-panel: 0.5rem;       /* verified: media and dropdown corners */
+  --radius-card: 1rem;          /* verified: every card and section container */
+  --radius-pill: 50rem;         /* verified: call-to-action buttons */
+
+  /* Verified: the site's only shadow, on its dropdown menu. Cards are flat. */
+  --shadow-overlay: 0 0.125em 0.25em rgb(0 0 0 / 0.07), 0 0.25em 0.5em rgb(0 0 0 / 0.07),
+    0 0.5em 1em rgb(0 0 0 / 0.07), 0 1em 2em rgb(0 0 0 / 0.07);
 }
 
 @layer base {
-  * { border-color: var(--border); }
+  * {
+    border-color: var(--border);
+  }
 
   body {
     background: var(--background);
-    color: var(--text);
+    color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Every interactive element must show a visible focus ring — a sizeable
-     share of this audience navigates by keyboard or screen reader. */
+  /* Every interactive element shows a visible focus ring — a sizeable share
+     of this audience navigates by keyboard or screen reader. The ring is
+     offset so it reads against the element's own fill as well as the page. */
   :focus-visible {
-    outline: 2px solid var(--color-sierra-500);
+    outline: 2px solid var(--focus);
     outline-offset: 2px;
-    border-radius: 4px;
+  }
+
+  /* On the charcoal surfaces a charcoal ring would vanish; gold does not. */
+  .on-ink {
+    --focus: var(--gs-gold);
+  }
+
+  ::selection {
+    background: var(--gs-gold);
+    color: var(--gs-charcoal);
   }
 }
 
-@layer utilities {
-  .bg-surface { background-color: var(--surface); }
-  .bg-surface-muted { background-color: var(--surface-muted); }
-  .text-muted { color: var(--text-muted); }
-  .border-default { border-color: var(--border); }
+/* Display type. The site sets headings in Barlow Black with tight leading. */
+.display {
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+/* Links in running text: tobacco and underlined, as on the site. */
+.link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.link:hover {
+  color: var(--accent-hover);
 }
 
 /* Typed-answer rendering. Deliberately tight so a short answer looks short. */
-.answer-prose { line-height: 1.65; }
+.answer-prose { line-height: 1.6; }
 .answer-prose > * + * { margin-top: 0.75rem; }
 .answer-prose h3 {
-  font-weight: 650;
-  font-size: 0.975rem;
+  font-weight: 700;
+  font-size: 1rem;
   margin-top: 1.1rem;
 }
 .answer-prose ul, .answer-prose ol { padding-left: 1.2rem; }
 .answer-prose li + li { margin-top: 0.3rem; }
 .answer-prose ul { list-style: disc; }
 .answer-prose ol { list-style: decimal; }
-.answer-prose a { color: var(--color-sierra-600); text-decoration: underline; text-underline-offset: 2px; }
-.answer-prose strong { font-weight: 650; }
+.answer-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.answer-prose a:hover { color: var(--accent-hover); }
+.answer-prose strong { font-weight: 700; }
 
 @keyframes gs-pulse {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
@@ -108,9 +257,17 @@
 }
 .typing-dot { animation: gs-pulse 1.3s infinite ease-in-out; }
 
+@keyframes gs-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in { animation: gs-rise 0.2s var(--ease) both; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

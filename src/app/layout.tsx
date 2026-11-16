@@ -1,5 +1,19 @@
 import type { Metadata, Viewport } from 'next';
+import { Barlow } from 'next/font/google';
 import './globals.css';
+
+/**
+ * Barlow is Golden Sierra's typeface. The agency's site loads it at 400, 700
+ * and 900; 500 and 600 are added here for dense admin labels. Self-hosted by
+ * next/font, so there is no request to a font CDN and no flash of fallback
+ * text.
+ */
+const barlow = Barlow({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '900'],
+  variable: '--font-barlow',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Workforce Navigator — Golden Sierra',
@@ -11,24 +25,13 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f7faf8' },
-    { media: '(prefers-color-scheme: dark)', color: '#17231c' },
-  ],
+  // The charcoal of the header, so mobile browser chrome continues it.
+  themeColor: '#231f20',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <head>
-        {/* DM Sans + Manrope are the console design's typefaces. */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="en" className={barlow.variable}>
       <body className="min-h-dvh">{children}</body>
     </html>
   );

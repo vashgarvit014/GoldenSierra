@@ -108,6 +108,7 @@ export function TestingLab() {
         >
           <input
             id="testQuery"
+            aria-label="Test question"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Type a question to test…"
@@ -273,7 +274,7 @@ function Select({
   return (
     <div className="field" style={{ marginBottom: 0, minWidth: 170 }}>
       <label>{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => (
           <option key={o} value={o}>
             {o ? o.replace(/_/g, ' ') : 'Not stated'}

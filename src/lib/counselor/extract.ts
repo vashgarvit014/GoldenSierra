@@ -243,7 +243,9 @@ export async function extractContext(
     if (isOneOf(data.employmentStatus, ['unemployed', 'employed', 'underemployed', 'laid_off', 'student'])) {
       merged.employmentStatus = data.employmentStatus as CounselorContext['employmentStatus'];
     }
-    if (isOneOf(data.transportation, ['own_vehicle', 'transit_only', 'none'])) {
+    // An explicit statement matched by the rules ("no reliable transport") is
+    // not the model's to reinterpret; it only fills the gap when rules found none.
+    if (!baseline.transportation && isOneOf(data.transportation, ['own_vehicle', 'transit_only', 'none'])) {
       merged.transportation = data.transportation as CounselorContext['transportation'];
     }
     if (isOneOf(data.incomeUrgency, ['immediate', 'can_train_first', 'flexible'])) {

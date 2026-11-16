@@ -108,8 +108,8 @@ export function TestConsole() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Chatbot testing</h1>
-        <p className="text-sm text-muted">
+        <h1 className="display text-3xl text-foreground">Chatbot testing</h1>
+        <p className="text-sm text-muted-foreground">
           Run the full pipeline and inspect what the answer was built from. Test queries are not
           saved to conversation history or analytics.
         </p>
@@ -118,6 +118,7 @@ export function TestConsole() {
       <Card>
         <CardContent className="space-y-3 pt-5">
           <Textarea
+            aria-label="Test question"
             rows={3}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -130,7 +131,7 @@ export function TestConsole() {
                 key={preset}
                 type="button"
                 onClick={() => setMessage(preset)}
-                className="rounded-full border border-default bg-surface-muted px-2.5 py-1 text-xs hover:border-sierra-300"
+                className="rounded-pill border-2 border-accent bg-surface px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent-soft"
               >
                 {preset.length > 46 ? `${preset.slice(0, 46)}…` : preset}
               </button>
@@ -189,7 +190,7 @@ export function TestConsole() {
                       ungrounded
                     </Badge>
                   )}
-                  <span className="ml-auto text-xs font-normal text-muted">
+                  <span className="ml-auto text-xs font-normal text-muted-foreground">
                     {result.latencyMs} ms
                   </span>
                 </CardTitle>
@@ -200,13 +201,13 @@ export function TestConsole() {
                 </div>
 
                 {result.followUpSuggestions.length > 0 && (
-                  <div className="mt-4 border-t border-default pt-3">
+                  <div className="mt-4 border-t border-border pt-3">
                     <p className="mb-1.5 text-xs font-medium">Suggested follow-ups</p>
                     <div className="flex flex-wrap gap-1.5">
                       {result.followUpSuggestions.map((s) => (
                         <span
                           key={s}
-                          className="rounded-full border border-default bg-surface-muted px-2.5 py-1 text-xs"
+                          className="rounded-control border border-border bg-muted px-2.5 py-1 text-xs font-semibold"
                         >
                           {s}
                         </span>
@@ -243,7 +244,7 @@ export function TestConsole() {
                 )}
 
                 {result.recommendations.length > 0 && (
-                  <div className="mt-4 border-t border-default pt-3">
+                  <div className="mt-4 border-t border-border pt-3">
                     <p className="mb-1.5 text-xs font-medium">
                       Matched programs ({result.recommendations.length})
                     </p>
@@ -256,7 +257,7 @@ export function TestConsole() {
                               staff confirm
                             </Badge>
                           )}
-                          <span className="block text-muted">{rec.whyRelevant}</span>
+                          <span className="block text-muted-foreground">{rec.whyRelevant}</span>
                         </li>
                       ))}
                     </ul>
@@ -269,39 +270,39 @@ export function TestConsole() {
           <Card>
             <CardHeader>
               <CardTitle>Retrieved passages ({result.retrievedSources.length})</CardTitle>
-              <p className="mt-1 text-xs text-muted">
+              <p className="mt-1 text-xs text-muted-foreground">
                 In the order supplied to the model. These are the numbered sources the answer cites.
               </p>
             </CardHeader>
             <CardContent>
               {result.retrievedSources.length === 0 ? (
-                <p className="text-sm text-muted">
+                <p className="text-sm text-muted-foreground">
                   Nothing retrieved — the answer could not be grounded. Check that content is
                   indexed for this topic.
                 </p>
               ) : (
                 <ol className="space-y-3">
                   {result.retrievedSources.map((source, i) => (
-                    <li key={i} className="border-l-2 border-sierra-200 pl-3">
+                    <li key={i} className="border-l-2 border-border pl-3">
                       <div className="flex flex-wrap items-baseline gap-2">
                         <span className="text-xs font-semibold">[{i + 1}]</span>
                         <span className="text-sm font-medium">{source.title}</span>
                         {source.category && <Badge tone="neutral">{source.category}</Badge>}
-                        <span className="ml-auto font-mono text-xs text-muted">
+                        <span className="ml-auto font-mono text-xs text-muted-foreground">
                           score {source.score.toFixed(3)}
                           {source.rerankScore != null && ` · rerank ${source.rerankScore.toFixed(3)}`}
                         </span>
                       </div>
                       {source.headingPath && (
-                        <p className="text-xs text-muted">{source.headingPath}</p>
+                        <p className="text-xs text-muted-foreground">{source.headingPath}</p>
                       )}
-                      <p className="mt-1 text-xs leading-relaxed text-muted">{source.snippet}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{source.snippet}</p>
                       {source.url && (
                         <a
                           href={source.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-sierra-700 hover:underline dark:text-sierra-300"
+                          className="text-xs link"
                         >
                           {source.url}
                         </a>
@@ -335,7 +336,7 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-9 rounded-lg border border-default bg-surface px-2 text-sm"
+        className="h-9 rounded-control border border-input bg-surface px-2 text-sm"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -350,7 +351,7 @@ function Select({
 function Row({ term, value }: { term: string; value: string }) {
   return (
     <div className="flex gap-3">
-      <dt className="w-32 shrink-0 text-muted">{term}</dt>
+      <dt className="w-32 shrink-0 text-muted-foreground">{term}</dt>
       <dd className="min-w-0 break-words font-medium">{value}</dd>
     </div>
   );

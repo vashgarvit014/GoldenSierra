@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Input, Spinner } from '@/components/ui';
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Input, Logo, Spinner } from '@/components/ui';
 
 export function LoginForm() {
   const router = useRouter();
@@ -37,17 +37,19 @@ export function LoginForm() {
   }
 
   return (
+    <>
+    <Logo className="h-10" />
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Admin sign in</CardTitle>
-        <p className="mt-1 text-xs text-muted">
+        <CardTitle className="text-xl text-accent">Admin sign in</CardTitle>
+        <p className="mt-1 text-xs text-muted-foreground">
           Knowledge management for the Workforce Navigator.
         </p>
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="space-y-3">
           <div>
-            <label htmlFor="email" className="mb-1 block text-xs font-medium">
+            <label htmlFor="email" className="mb-1 block text-sm font-bold">
               Email
             </label>
             <Input
@@ -60,7 +62,7 @@ export function LoginForm() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1 block text-xs font-medium">
+            <label htmlFor="password" className="mb-1 block text-sm font-bold">
               Password
             </label>
             <Input
@@ -81,10 +83,11 @@ export function LoginForm() {
           </Button>
         </form>
 
-        <p className="mt-4 text-xs text-muted">
+        <p className="mt-4 text-xs text-muted-foreground">
           No account yet? Create one with <code className="font-mono">npm run admin:create</code>.
         </p>
       </CardContent>
     </Card>
+    </>
   );
 }

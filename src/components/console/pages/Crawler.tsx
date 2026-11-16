@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Head, useApi, useConsole } from '../Console';
+import { statusClass } from '@/lib/status';
 import { relativeTime } from './Overview';
 
 type Source = {
@@ -166,6 +167,7 @@ export function Crawler() {
         <form className="crawler-form" onSubmit={addSource}>
           <input
             id="urlInput"
+            aria-label="Website URL"
             type="url"
             required
             placeholder="https://goldensierra.com/"
@@ -173,6 +175,7 @@ export function Crawler() {
             onChange={(e) => setUrl(e.target.value)}
           />
           <input
+            aria-label="Source label"
             placeholder="Label (optional)"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -242,7 +245,7 @@ export function Crawler() {
                       {s.lastCrawledAt ? relativeTime(s.lastCrawledAt) : 'never'}
                     </td>
                     <td>
-                      <span className={`status${s.status === 'ACTIVE' ? '' : ' gray'}`}>
+                      <span className={statusClass(s.status)}>
                         {s.status.toLowerCase()}
                       </span>
                     </td>
@@ -298,17 +301,7 @@ export function Crawler() {
                 <b style={{ fontSize: 12 }}>
                   {job.sourceName ?? job.type.replace(/_/g, ' ').toLowerCase()}
                 </b>
-                <span
-                  className={`status${
-                    job.status === 'COMPLETED'
-                      ? ''
-                      : job.status === 'FAILED'
-                        ? ' warn'
-                        : job.status === 'RUNNING'
-                          ? ''
-                          : ' gray'
-                  }`}
-                >
+                <span className={statusClass(job.status)}>
                   {job.status.toLowerCase()}
                 </span>
               </div>

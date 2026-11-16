@@ -29,8 +29,8 @@ export default async function ProgramsPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">Programs</h1>
-        <p className="text-sm text-muted">
+        <h1 className="display text-3xl text-foreground">Programs</h1>
+        <p className="text-sm text-muted-foreground">
           {programs.length} services across {categories.length} categories. Edit through{' '}
           <code className="font-mono text-xs">/api/admin/programs</code> or{' '}
           <code className="font-mono text-xs">prisma/seed.ts</code>.
@@ -50,7 +50,7 @@ export default async function ProgramsPage() {
 
         return (
           <section key={audience}>
-            <h2 className="mb-2 text-sm font-semibold capitalize">
+            <h2 className="mb-2 text-lg font-bold capitalize text-accent">
               {audience.replace('_', ' ')} services
             </h2>
             <div className="space-y-3">
@@ -60,9 +60,9 @@ export default async function ProgramsPage() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
                         <CardTitle>{program.name}</CardTitle>
-                        <p className="mt-0.5 font-mono text-xs text-muted">{program.slug}</p>
+                        <p className="mt-0.5 font-mono text-xs text-muted-foreground">{program.slug}</p>
                       </div>
-                      <div className="flex shrink-0 flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 sm:shrink-0">
                         <Badge tone={program.status === 'ACTIVE' ? 'success' : 'neutral'}>
                           {program.status.toLowerCase()}
                         </Badge>
@@ -94,14 +94,14 @@ export default async function ProgramsPage() {
                       <Link
                         href={program.officialUrl}
                         target="_blank"
-                        className="mt-2 inline-block text-xs text-sierra-700 hover:underline dark:text-sierra-300"
+                        className="link mt-2 inline-block break-all py-1 text-xs"
                       >
                         {program.officialUrl}
                       </Link>
                     )}
 
                     {program.rules.length > 0 && (
-                      <div className="mt-3 border-t border-default pt-3">
+                      <div className="mt-3 border-t border-border pt-3">
                         <p className="mb-1.5 text-xs font-medium">
                           Eligibility rules ({program.rules.length})
                         </p>
@@ -118,7 +118,7 @@ export default async function ProgramsPage() {
                                   href={rule.sourceUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-sierra-600 hover:underline dark:text-sierra-300"
+                                  className="link inline-flex min-h-6 items-center"
                                 >
                                   source
                                 </a>
@@ -142,7 +142,7 @@ export default async function ProgramsPage() {
 function Row({ term, value }: { term: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-muted">{term}</dt>
+      <dt className="text-muted-foreground">{term}</dt>
       <dd className="text-right font-medium">{value}</dd>
     </div>
   );

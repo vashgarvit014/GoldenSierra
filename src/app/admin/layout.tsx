@@ -12,7 +12,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!session) {
     return (
-      <main className="flex min-h-dvh items-center justify-center px-6">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-muted px-6 py-10">
         <LoginForm />
       </main>
     );

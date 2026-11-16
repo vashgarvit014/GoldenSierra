@@ -88,8 +88,8 @@ export function Settings() {
                 <tbody>
                   {Object.entries(data.readOnly).map(([k, v]) => (
                     <tr key={k}>
-                      <td style={{ width: 240 }}><b>{k}</b></td>
-                      <td style={{ wordBreak: 'break-all' }}>{Array.isArray(v) ? v.join(', ') : String(v)}</td>
+                      <td className="kv-key"><b>{k}</b></td>
+                      <td className="kv-value">{Array.isArray(v) ? v.join(', ') : String(v)}</td>
                     </tr>
                   ))}
                 </tbody>

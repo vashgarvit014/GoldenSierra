@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, ListChecks, MapPin, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowRight, ArrowUp, Check, ChevronDown, ListChecks, MapPin, RefreshCw, Sparkles } from 'lucide-react';
 import { MessageBubble, TypingIndicator } from './MessageBubble';
 import { RecommendationCard } from './RecommendationCard';
-import { Alert, Badge, Button, Textarea } from '@/components/ui';
+import { Alert, Badge, Button, Logo, Textarea } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import type { Recommendation } from '@/types/chat';
 import {
@@ -24,7 +24,7 @@ import {
  * situation first, asks one useful question at a time, and consolidates
  * recommendations once it knows enough.
  *
- * Everything visual stays in the project's design system: sierra/gold tokens,
+ * Everything visual comes from the shared Golden Sierra tokens in globals.css:
  * the existing bubbles, cards and primitives. No sidebar — what the assistant
  * has understood appears as a compact, collapsible strip under the header.
  */
@@ -153,24 +153,24 @@ export function ChatPanel() {
   return (
     <div className="flex h-full flex-col">
       {/* ── Header: unchanged layout, plus a compact context toggle ── */}
-      <header className="border-b border-default bg-surface">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <div className="min-w-0">
-            <h1 className="text-sm font-semibold leading-tight">Workforce Navigator</h1>
-            <p className="truncate text-xs text-muted">
-              Golden Sierra Job Training Agency · Placer, El Dorado &amp; Alpine counties
-            </p>
+      <header className="on-ink bg-ink text-ink-foreground">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-4">
+            <Logo onInk className="h-8 shrink-0 sm:h-9" />
+            <div className="hidden min-w-0 border-l border-ink-border pl-4 sm:block">
+              <h1 className="text-sm font-bold leading-tight">Workforce Navigator</h1>
+              <p className="truncate text-xs text-ink-muted">Placer, El Dorado &amp; Alpine counties</p>
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {turn?.context.county && (
-              <span className="hidden items-center gap-1 rounded-full bg-sierra-50 px-2 py-1 text-xs text-sierra-800 sm:inline-flex dark:bg-sierra-900 dark:text-sierra-100">
-                <MapPin className="h-3 w-3" aria-hidden="true" />
+              <span className="hidden items-center gap-1 rounded-control border border-ink-border px-2 py-1 text-xs text-ink-foreground sm:inline-flex">
+                <MapPin className="h-3 w-3 text-primary" aria-hidden="true" />
                 {turn.context.county}
               </span>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
+              type="button"
               onClick={() => {
                 sessionStorage.removeItem(TOKEN_KEY);
                 setMode(null);
@@ -179,21 +179,23 @@ export function ChatPanel() {
               }}
               disabled={sending}
               title="Start a new conversation"
+              className="inline-flex h-9 items-center gap-1.5 rounded-pill px-3 text-sm font-bold text-primary hover:bg-ink-raised disabled:opacity-50"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">New chat</span>
-            </Button>
+              <span className="sr-only sm:hidden">New chat</span>
+            </button>
           </div>
         </div>
 
         {/* Compact summary of what has been understood — inline, not a sidebar. */}
         {facts.length > 0 && (
-          <div className="border-t border-default px-4 py-2">
+          <div className="border-t border-ink-border px-4 py-2 sm:px-6">
             <button
               type="button"
               onClick={() => setShowContext((v) => !v)}
               aria-expanded={showContext}
-              className="flex items-center gap-1.5 text-xs font-medium text-muted hover:text-[var(--text)]"
+              className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-ink-foreground"
             >
               <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
               What I&apos;ve noted ({facts.length})
@@ -206,7 +208,7 @@ export function ChatPanel() {
             {showContext && (
               <div className="mt-2 flex flex-wrap gap-1.5" data-noted>
                 {facts.map((f) => (
-                  <Badge key={f.key} tone="success" title={f.dimension}>
+                  <Badge key={f.key} tone="accent" title={f.dimension}>
                     <Check className="h-3 w-3" aria-hidden="true" />
                     {f.label}
                   </Badge>
@@ -225,19 +227,19 @@ export function ChatPanel() {
       {/* ── Transcript ── */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-5"
+        className="flex-1 overflow-y-auto bg-muted px-4 py-6"
         role="log"
         aria-live="polite"
         aria-label="Conversation"
       >
         <div className="mx-auto max-w-3xl space-y-5">
           {messages.length === 0 && (
-            <div className="rounded-2xl rounded-bl-md border border-default bg-surface px-4 py-3">
+            <div className="rise-in rounded-card rounded-bl-control border border-border bg-surface px-5 py-4">
               <div className="flex items-start gap-2.5">
-                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold-500" aria-hidden="true" />
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
                 <div>
-                  <p className="text-sm font-semibold">{opener.title}</p>
-                  <p className="mt-1 text-sm leading-relaxed">{opener.body}</p>
+                  <p className="text-base font-bold text-accent">{opener.title}</p>
+                  <p className="mt-1 text-[15px] leading-relaxed">{opener.body}</p>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
@@ -259,9 +261,7 @@ export function ChatPanel() {
                 key={m.id}
                 message={m}
                 isLatest={i === messages.length - 1}
-                sending={sending}
                 feedbackGiven={feedback[m.id] ?? null}
-                onReply={(v) => void send(v)}
                 onFeedback={rate}
               />
             ),
@@ -278,7 +278,7 @@ export function ChatPanel() {
       </div>
 
       {/* ── Composer ── */}
-      <div className="border-t border-default bg-surface px-4 py-3">
+      <div className="border-t border-border bg-surface px-4 py-3">
         <div className="mx-auto max-w-3xl">
           {/* Contextual quick replies for the question just asked. */}
           {!sending && quickReplies.length > 0 && (
@@ -319,12 +319,12 @@ export function ChatPanel() {
               placeholder="Type your answer…"
               disabled={sending}
               maxLength={2000}
-              className="min-h-10 py-2.5"
+              className="min-h-11 rounded-panel py-2.5 text-base"
             />
             {turn?.canShowResults && turn.stage !== 'results' && (
               <Button
                 type="button"
-                variant="gold"
+                variant="primary"
                 disabled={sending}
                 onClick={() => void send('Show me what fits', true)}
                 className="shrink-0"
@@ -344,7 +344,7 @@ export function ChatPanel() {
             </Button>
           </form>
 
-          <p className="mt-2 text-center text-[11px] leading-snug text-muted">
+          <p className="mt-2 text-center text-xs leading-snug text-muted-foreground">
             This assistant shares published information and cannot decide eligibility. Golden Sierra
             staff confirm who qualifies · (916) 746-7722
           </p>
@@ -354,7 +354,7 @@ export function ChatPanel() {
   );
 }
 
-/** Styled with the project's own tokens — no reference palette. */
+/** Quick replies are real answers, so they look like the site's outline button. */
 function QuickReply({
   label,
   onClick,
@@ -367,12 +367,13 @@ function QuickReply({
   return (
     <button
       type="button"
+      data-quick-reply
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'rounded-full border border-default bg-surface-muted px-3 py-1.5 text-xs',
-        'hover:border-sierra-300 hover:bg-sierra-50 disabled:opacity-50',
-        'dark:hover:bg-sierra-900',
+        'min-h-9 rounded-pill border-2 border-accent bg-surface px-3.5 py-1 text-sm font-semibold text-accent',
+        'transition-colors duration-150 hover:bg-accent-soft hover:text-accent-hover active:text-accent-active',
+        'disabled:pointer-events-none disabled:opacity-50',
       )}
     >
       {label}
@@ -388,43 +389,80 @@ function ModeChooser({
   error: string | null;
 }) {
   return (
-    <div className="flex h-full items-center justify-center px-5">
-      <div className="w-full max-w-lg text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sierra-50 text-sierra-700 dark:bg-sierra-900 dark:text-sierra-200">
-          <Sparkles className="h-5 w-5" aria-hidden="true" />
+    <div className="flex h-full flex-col bg-muted">
+      <header className="on-ink bg-ink px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <Logo onInk />
+          <p className="hidden text-sm text-ink-muted sm:block">Placer, El Dorado &amp; Alpine counties</p>
         </div>
-        <h1 className="text-xl font-semibold tracking-tight">Let&apos;s find the right support</h1>
-        <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-          A few short questions, then services that fit the situation — with the sources behind them.
-        </p>
+      </header>
 
-        {error && (
-          <Alert tone="danger" className="mt-4 text-left">
-            {error}
-          </Alert>
-        )}
+      <main className="flex-1 overflow-y-auto">
+        {/* The site's hero: a flat gold field with a charcoal-and-tobacco headline. */}
+        <section className="bg-primary px-5 py-10 sm:py-14">
+          <div className="mx-auto max-w-5xl">
+            <h1 className="display text-4xl text-foreground sm:text-6xl">
+              <span className="text-accent">Let&apos;s find</span> the right support.
+            </h1>
+            <p className="mt-4 max-w-xl text-lg leading-relaxed text-primary-foreground">
+              A few short questions, then services that fit the situation — with the sources
+              behind them.
+            </p>
+          </div>
+        </section>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <button
-            onClick={() => onChoose('self')}
-            className="rounded-xl border border-default bg-surface p-4 text-left transition hover:border-sierra-300 hover:shadow-sm"
-          >
-            <span className="block text-sm font-semibold">I&apos;m looking for myself</span>
-            <span className="mt-1 block text-xs leading-relaxed text-muted">
-              Work, training, or help paying for it.
-            </span>
-          </button>
-          <button
-            onClick={() => onChoose('helper')}
-            className="rounded-xl border border-default bg-surface p-4 text-left transition hover:border-sierra-300 hover:shadow-sm"
-          >
-            <span className="block text-sm font-semibold">I&apos;m helping someone</span>
-            <span className="mt-1 block text-xs leading-relaxed text-muted">
-              A client, a student, or a family member.
-            </span>
-          </button>
-        </div>
-      </div>
+        <section className="px-5 py-8">
+          <div className="mx-auto max-w-5xl">
+            {error && (
+              <Alert tone="danger" className="mb-4">
+                {error}
+              </Alert>
+            )}
+            <h2 className="sr-only">Who is this for?</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModeCard
+                title="I'm looking for myself"
+                body="Work, training, or help paying for it."
+                cta="Start"
+                onClick={() => onChoose('self')}
+              />
+              <ModeCard
+                title="I'm helping someone"
+                body="A client, a student, or a family member."
+                cta="Start"
+                onClick={() => onChoose('helper')}
+              />
+            </div>
+            <p className="mt-6 text-sm text-muted-foreground">
+              This assistant shares published information and cannot decide eligibility. Golden
+              Sierra staff confirm who qualifies · (916) 746-7722
+            </p>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function ModeCard({
+  title,
+  body,
+  cta,
+  onClick,
+}: {
+  title: string;
+  body: string;
+  cta: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-start rounded-card bg-surface p-6">
+      <h3 className="text-xl font-bold text-accent">{title}</h3>
+      <p className="mt-1 flex-1 text-base leading-relaxed">{body}</p>
+      <Button type="button" onClick={onClick} className="mt-5" aria-label={`${cta}: ${title}`}>
+        {cta}
+        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+      </Button>
     </div>
   );
 }
@@ -432,16 +470,12 @@ function ModeChooser({
 function AssistantTurn({
   message,
   isLatest,
-  sending,
   feedbackGiven,
-  onReply,
   onFeedback,
 }: {
   message: CounselorMessage;
   isLatest: boolean;
-  sending: boolean;
   feedbackGiven: 'HELPFUL' | 'NOT_HELPFUL' | null;
-  onReply: (value: string) => void;
   onFeedback: (id: string, rating: 'HELPFUL' | 'NOT_HELPFUL') => void;
 }) {
   const t = message.turn;
@@ -481,31 +515,13 @@ function AssistantTurn({
         feedbackGiven={feedbackGiven}
       />
 
-      {/* An interpretation the assistant is relying on — correctable, never silent. */}
-      {t?.assumption && (
-        <div className="rounded-lg border border-gold-300 bg-gold-100 px-3 py-2.5 text-xs text-gold-700">
-          <p className="font-semibold">Assuming from what you&apos;ve told me</p>
-          <p className="mt-1 leading-relaxed">{t.assumption.text}</p>
-          {isLatest && (
-            <button
-              type="button"
-              className="mt-1.5 font-semibold underline underline-offset-2"
-              onClick={() => onReply("That's not quite right — let me correct that")}
-              disabled={sending}
-            >
-              That&apos;s not right
-            </button>
-          )}
-        </div>
-      )}
-
       {isResults && t.recommendations.length > 0 && (
         // Only the newest set is spelled out. Earlier ones were drawn from
         // less information, so repeating them stacks stale cards up the
         // transcript and contradicts the current count.
         isLatest ? (
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
               {t.recommendations.length === 1 ? 'Service that may fit' : 'Services that may fit'}
             </p>
             {t.recommendations.map((m) => (
@@ -513,7 +529,7 @@ function AssistantTurn({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted">
+          <p className="text-xs text-muted-foreground">
             {t.recommendations.length} service{t.recommendations.length === 1 ? '' : 's'} suggested
             here — updated further down as we learned more.
           </p>

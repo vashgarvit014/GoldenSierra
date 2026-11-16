@@ -21,7 +21,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
   if (turn.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-br-md bg-sierra-700 px-4 py-2.5 text-sm text-white">
+        <div className="max-w-[85%] sm:max-w-[75%] rounded-card rounded-br-control bg-ink px-4 py-2.5 text-[15px] leading-relaxed text-ink-foreground">
           {turn.content}
         </div>
       </div>
@@ -35,20 +35,20 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="max-w-full rounded-2xl rounded-bl-md bg-surface border border-default px-4 py-3 text-sm">
+      <div className="rise-in max-w-full rounded-card rounded-bl-control border border-border bg-surface px-4 py-3 text-[15px]">
         <Markdown
           content={turn.content}
           citations={citations}
           onCitationClick={() => setShowSources(true)}
         />
         {streaming && (
-          <span className="ml-1 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-sierra-500" />
+          <span className="ml-1 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-accent" />
         )}
       </div>
 
       {/* An answer the pipeline could not ground is labelled, not hidden. */}
       {!streaming && payload && !payload.grounded && (
-        <div className="flex items-start gap-2 rounded-lg border border-gold-300 bg-gold-100 px-3 py-2 text-xs text-gold-700">
+        <div className="flex items-start gap-2 rounded-panel border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-strong">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden="true" />
           <span>
             This answer is not backed by indexed Golden Sierra sources. Please confirm anything
@@ -58,7 +58,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
       )}
 
       {conflicts.length > 0 && (
-        <div className="rounded-lg border border-gold-300 bg-gold-100 px-3 py-2 text-xs text-gold-700">
+        <div className="rounded-panel border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-strong">
           <p className="font-semibold mb-1">Sources disagree</p>
           {conflicts.map((conflict, i) => (
             <p key={i}>
@@ -71,7 +71,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
 
       {recommendations.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted uppercase tracking-wide">
+          <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
             {recommendations.length === 1 ? 'Service that may fit' : 'Services that may fit'}
           </p>
           {recommendations.map((recommendation) => (
@@ -89,7 +89,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
             type="button"
             onClick={() => setShowSources((v) => !v)}
             aria-expanded={showSources}
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-[var(--text)]"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
           >
             <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
             {showSources ? 'Hide sources' : `${citations.length} source${citations.length === 1 ? '' : 's'}`}
@@ -99,7 +99,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
             <ul className="mt-2 space-y-1.5">
               {citations.map((citation) => (
                 <li key={citation.id} className="flex items-start gap-2 text-xs">
-                  <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-sierra-100 px-1 text-[10px] font-semibold text-sierra-800 dark:bg-sierra-800 dark:text-sierra-100">
+                  <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-control bg-accent-soft px-1 text-[10px] font-bold text-accent">
                     {citation.id}
                   </span>
                   <span className="min-w-0">
@@ -108,7 +108,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
                         href={citation.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sierra-700 hover:underline dark:text-sierra-300 inline-flex items-center gap-1"
+                        className="link inline-flex items-center gap-1"
                       >
                         {citation.title}
                         <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -116,7 +116,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
                     ) : (
                       <span>{citation.title}</span>
                     )}
-                    <span className="block text-muted">
+                    <span className="block text-muted-foreground">
                       {hostOf(citation.url)}
                       {citation.lastVerified && ` · checked ${formatDate(citation.lastVerified)}`}
                       {citation.documentType === 'PDF' && ' · PDF'}
@@ -138,12 +138,12 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
             </Badge>
           ) : (
             <>
-              <span className="text-xs text-muted">Was this helpful?</span>
+              <span className="text-xs text-muted-foreground">Was this helpful?</span>
               <button
                 type="button"
                 onClick={() => onFeedback(turn.id, 'HELPFUL')}
                 aria-label="This answer was helpful"
-                className="rounded p-1 text-muted hover:bg-surface-muted hover:text-sierra-700"
+                className="rounded-control p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <ThumbsUp className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -151,7 +151,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
                 type="button"
                 onClick={() => onFeedback(turn.id, 'NOT_HELPFUL')}
                 aria-label="This answer was not helpful"
-                className="rounded p-1 text-muted hover:bg-surface-muted hover:text-red-600"
+                className="rounded-control p-1 text-muted-foreground hover:bg-muted hover:text-destructive-strong"
               >
                 <ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -166,7 +166,7 @@ export function MessageBubble({ turn, streaming, onFeedback, feedbackGiven }: Pr
 export function TypingIndicator({ label = 'Looking through Golden Sierra resources' }: { label?: string }) {
   return (
     <div
-      className="flex items-center gap-2.5 rounded-2xl rounded-bl-md bg-surface border border-default px-4 py-3 w-fit"
+      className="flex w-fit items-center gap-2.5 rounded-card rounded-bl-control border border-border bg-surface px-4 py-3"
       role="status"
       aria-live="polite"
     >
@@ -174,12 +174,12 @@ export function TypingIndicator({ label = 'Looking through Golden Sierra resourc
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className={cn('typing-dot h-1.5 w-1.5 rounded-full bg-sierra-500')}
+            className={cn('typing-dot h-1.5 w-1.5 rounded-full bg-accent')}
             style={{ animationDelay: `${i * 0.16}s` }}
           />
         ))}
       </span>
-      <span className="text-xs text-muted">{label}…</span>
+      <span className="text-xs text-muted-foreground">{label}…</span>
     </div>
   );
 }

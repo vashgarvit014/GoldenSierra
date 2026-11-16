@@ -6,7 +6,7 @@
  *
  * The design follows the brief's central rule: the assistant understands
  * before it recommends. Everything here exists to support one adaptive
- * question at a time, with honest counts and visible assumptions.
+ * question at a time, with honest counts and carefully handled assumptions.
  */
 
 export type SessionMode = 'self' | 'helper';
@@ -89,9 +89,10 @@ export type KnownFact = {
 };
 
 /**
- * An interpretation the system is relying on. Surfaced in the highlighted
- * "Assuming from what you've told me" box so it can be corrected, and never
- * silently promoted to fact.
+ * An interpretation the system is relying on. Internal only: it is not
+ * rendered as a dedicated notice. Uncertainty that matters reaches the user
+ * in the relevant recommendation ("Staff confirm", "Worth checking") or as a
+ * normal follow-up question. Never silently promoted to fact.
  */
 export type Assumption = {
   id: string;

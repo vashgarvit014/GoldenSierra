@@ -13,7 +13,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3100';
-const OUT = path.resolve('test-artifacts/counselor');
+const OUT = path.resolve(process.env.E2E_OUT ?? 'test-artifacts/counselor');
 
 type Check = { name: string; ok: boolean; detail: string };
 const checks: Check[] = [];
@@ -26,6 +26,13 @@ const check = (name: string, ok: boolean, detail = '') => {
 async function lastAnswer(page: Page): Promise<string> {
   const bubbles = page.locator('div.answer-prose');
   return (await bubbles.last().innerText()).trim();
+}
+
+/** The removed assumption notice must never reappear, on any turn. */
+async function assertNoAssumptionNotice(page: Page, label: string) {
+  const text = await page.locator('[role="log"]').innerText();
+  const present = /Assuming from what you/i.test(text) || /That['’]s not right/i.test(text) || (await page.getByRole('button', { name: /not right/i }).count()) > 0;
+  check(`no assumption notice (${label})`, !present);
 }
 
 async function say(page: Page, text: string, label: string) {
@@ -42,6 +49,7 @@ async function say(page: Page, text: string, label: string) {
   await page.waitForTimeout(500);
   const answer = await lastAnswer(page);
   console.log(`\n  » ${label}\n    user: ${text}\n    bot : ${answer.replace(/\n/g, ' ').slice(0, 220)}`);
+  await assertNoAssumptionNotice(page, label);
   return answer;
 }
 
@@ -73,7 +81,7 @@ async function notedFacts(page: Page): Promise<string[]> {
   try {
     // ── mode selection ──
     await page.goto(BASE, { waitUntil: 'networkidle' });
-    await page.getByText("I'm helping someone").click();
+    await page.getByRole('button', { name: /helping someone/i }).click();
     await page.locator('#chat-input').waitFor({ timeout: 25_000 });
     check('helper mode starts a session', true);
     await page.screenshot({ path: path.join(OUT, '1-opening.png') });
@@ -120,7 +128,7 @@ async function notedFacts(page: Page): Promise<string[]> {
     check('still only one question', (a2.match(/\?/g) ?? []).length <= 1);
     // Quick replies matter on a question turn: they are how someone answers
     // without typing. They legitimately disappear once results are shown.
-    const replies = await page.locator('button.rounded-full').count();
+    const replies = await page.locator('button[data-quick-reply]').count();
     check('quick replies offered while clarifying', replies > 0, `${replies} buttons`);
     await page.screenshot({ path: path.join(OUT, '3-after-transport.png') });
 

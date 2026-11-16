@@ -75,7 +75,7 @@ export function ConfigForm({ initial, canEdit }: { initial: Config; canEdit: boo
       <CardHeader>
         <CardTitle>Retrieval and generation tuning</CardTitle>
         {!canEdit && (
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 text-xs text-muted-foreground">
             Read-only — changing these requires the admin role.
           </p>
         )}
@@ -86,7 +86,7 @@ export function ConfigForm({ initial, canEdit }: { initial: Config; canEdit: boo
             <label key={field.key} className="block">
               <span className="mb-1 flex items-baseline justify-between gap-2">
                 <span className="text-xs font-medium">{field.label}</span>
-                <span className="font-mono text-xs text-muted">{String(values[field.key])}</span>
+                <span className="font-mono text-xs text-muted-foreground">{String(values[field.key])}</span>
               </span>
               <Input
                 type="number"
@@ -99,7 +99,7 @@ export function ConfigForm({ initial, canEdit }: { initial: Config; canEdit: boo
                   setValues((v) => ({ ...v, [field.key]: Number(e.target.value) }))
                 }
               />
-              <span className="mt-1 block text-xs text-muted">{field.help}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">{field.help}</span>
             </label>
           ))}
 
@@ -113,7 +113,7 @@ export function ConfigForm({ initial, canEdit }: { initial: Config; canEdit: boo
             />
             <span>
               <span className="block text-xs font-medium">Reranking enabled</span>
-              <span className="block text-xs text-muted">
+              <span className="block text-xs text-muted-foreground">
                 Reorders candidates by relevance before generation. Costs latency; usually worth it.
               </span>
             </span>

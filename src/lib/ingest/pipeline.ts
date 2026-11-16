@@ -599,30 +599,38 @@ export async function runJob(jobId: string): Promise<void> {
       const params = (job.params ?? {}) as { documentIds?: string[] };
       return runReindexJob(jobId, params.documentIds);
     }
-    case JobType.PDF_INGEST: {
-      const params = (job.params ?? {}) as { url?: string };
-      if (!params.url) throw new Error('PDF_INGEST job requires a url parameter');
-      await prisma.ingestionJob.update({
-        where: { id: jobId },
-        data: { status: JobStatus.RUNNING, startedAt: new Date() },
-      });
-      await ingestPdfFromUrl(params.url, job.sourceId);
-      await prisma.ingestionJob.update({
-        where: { id: jobId },
-        data: { status: JobStatus.COMPLETED, finishedAt: new Date(), documentsCreated: 1 },
-      });
+    case JobType.PDF_INGEST:
+    case JobType.DELETE_DOCUMENT:
+      // Crawl and reindex record their own failures; these two did not, so an
+      // error left the row RUNNING forever — which also kept the console's
+      // crawl buttons disabled. Any throw now ends the job as FAILED.
+      try {
+        if (job.type === JobType.PDF_INGEST) {
+          const params = (job.params ?? {}) as { url?: string };
+          if (!params.url) throw new Error('PDF_INGEST job requires a url parameter');
+          await ingestPdfFromUrl(params.url, job.sourceId);
+          await prisma.ingestionJob.update({
+            where: { id: jobId },
+            data: { status: JobStatus.COMPLETED, finishedAt: new Date(), documentsCreated: 1 },
+          });
+        } else {
+          const params = (job.params ?? {}) as { documentId?: string };
+          if (!params.documentId) throw new Error('DELETE_DOCUMENT job requires a documentId');
+          await deleteDocument(params.documentId);
+          await prisma.ingestionJob.update({
+            where: { id: jobId },
+            data: { status: JobStatus.COMPLETED, finishedAt: new Date() },
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await prisma.ingestionJob.update({
+          where: { id: jobId },
+          data: { status: JobStatus.FAILED, error: message.slice(0, 2000), finishedAt: new Date() },
+        });
+        throw err;
+      }
       return;
-    }
-    case JobType.DELETE_DOCUMENT: {
-      const params = (job.params ?? {}) as { documentId?: string };
-      if (!params.documentId) throw new Error('DELETE_DOCUMENT job requires a documentId');
-      await deleteDocument(params.documentId);
-      await prisma.ingestionJob.update({
-        where: { id: jobId },
-        data: { status: JobStatus.COMPLETED, finishedAt: new Date() },
-      });
-      return;
-    }
     default:
       throw new Error(`Unsupported job type: ${job.type}`);
   }

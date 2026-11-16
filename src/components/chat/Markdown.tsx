@@ -183,7 +183,7 @@ function Inline({
                 onClick={() => onCitationClick?.(node.id)}
                 title={citation ? `Source: ${citation.title}` : `Source ${node.id}`}
                 aria-label={citation ? `Source ${node.id}: ${citation.title}` : `Source ${node.id}`}
-                className="mx-0.5 inline-flex h-[1.15em] min-w-[1.15em] items-center justify-center rounded bg-sierra-100 px-1 align-super text-[0.65em] font-semibold text-sierra-800 hover:bg-sierra-200 dark:bg-sierra-800 dark:text-sierra-100"
+                className="mx-0.5 inline-flex h-[1.15em] min-w-[1.15em] items-center justify-center rounded-control bg-accent-soft px-1 align-super text-[0.65em] font-bold text-accent hover:bg-muted"
               >
                 {node.id}
               </button>

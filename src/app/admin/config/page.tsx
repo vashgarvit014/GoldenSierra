@@ -43,8 +43,8 @@ export default async function ConfigPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold">AI configuration</h1>
-        <p className="text-sm text-muted">
+        <h1 className="display text-3xl text-foreground">AI configuration</h1>
+        <p className="text-sm text-muted-foreground">
           Retrieval and generation tuning. Provider credentials stay in the environment.
         </p>
       </div>
@@ -52,7 +52,7 @@ export default async function ConfigPage() {
       <Card>
         <CardHeader>
           <CardTitle>Models and endpoints</CardTitle>
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 text-xs text-muted-foreground">
             Read-only. Change these in the environment and redeploy — API keys are never served
             over HTTP, and a model change requires a re-index.
           </p>
@@ -87,7 +87,7 @@ export default async function ConfigPage() {
       <Card>
         <CardHeader>
           <CardTitle>Response template</CardTitle>
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 text-xs text-muted-foreground">
             Defined in <code className="font-mono">src/lib/ai/prompts.ts</code>. Edit{' '}
             <code className="font-mono">RESPONSE_STYLE</code> there to retune tone and length
             against reference conversations.
@@ -116,7 +116,7 @@ export default async function ConfigPage() {
 function Row({ term, value }: { term: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-0.5">
-      <dt className="shrink-0 text-muted">{term}</dt>
+      <dt className="shrink-0 text-muted-foreground">{term}</dt>
       <dd className="min-w-0 break-all text-right font-medium">{value}</dd>
     </div>
   );

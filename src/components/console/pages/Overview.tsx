@@ -176,7 +176,7 @@ export function Overview() {
             const done = job.status === 'COMPLETED';
             return (
               <div className="activity" key={job.id}>
-                <div className={`activity-icon${failed ? ' gold' : done ? '' : ' blue'}`}>
+                <div className={`activity-icon${failed ? ' failed' : done ? '' : ' blue'}`}>
                   {failed ? '!' : done ? '✓' : '▤'}
                 </div>
                 <div className="activity-body">
