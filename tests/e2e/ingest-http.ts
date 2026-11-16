@@ -175,24 +175,25 @@ async function pollJob(id: string, cookie: string, want: string, ms = 30000) {
   const srcName = `http-src-${RUN}`;
   const mkSource = (body: object, ck = cookie) => postJson('/api/admin/sources', { name: srcName, type: 'WEBSITE', ...body }, ck);
   const sourceIds: string[] = [];
-  check('source: unauthenticated → 401', (await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'http://127.0.0.1:4455/' })).status === 401);
-  check('source: VIEWER → 403', (await mkSource({ rootUrl: 'http://127.0.0.1:4455/' }, viewer)).status === 403);
-  const noHost = await mkSource({ rootUrl: 'https://not-authorized.example/' });
-  check('source: host not on the allowlist → 400 with a readable reason', noHost.status === 400 && /not authorized/i.test(noHost.body.error), JSON.stringify(noHost.body));
-  const badScheme = await mkSource({ rootUrl: 'ftp://127.0.0.1/' });
+  check('source: unauthenticated → 401', (await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'https://goldensierra.com/x' })).status === 401);
+  check('source: VIEWER → 403', (await mkSource({ rootUrl: 'https://goldensierra.com/x' }, viewer)).status === 403);
+  const noHost = await mkSource({ rootUrl: 'https://goldensiera.org/' });
+  check('source: the rejection names the host, lists allowed hosts and suggests the fix', noHost.status === 400 && /"goldensiera\.org"/.test(noHost.body.error) && /goldensierra\.com, www\.goldensierra\.com/.test(noHost.body.error) && /Did you mean goldensierra\.com/.test(noHost.body.error) && noHost.body.details?.host === 'goldensiera.org', JSON.stringify(noHost.body));
+  check('source: host not on the allowlist → 400 with a readable reason', noHost.status === 400 && /not an authorized crawl host/i.test(noHost.body.error), JSON.stringify(noHost.body));
+  const badScheme = await mkSource({ rootUrl: 'ftp://goldensierra.com/' });
   check('source: non-http scheme → 400', badScheme.status === 400, JSON.stringify(badScheme.body));
-  const shortName = await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'http://127.0.0.1:4455/' }, cookie);
+  const shortName = await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'https://goldensierra.com/x' }, cookie);
   check('source: schema errors come back as issues[]', shortName.status === 400 && Array.isArray(shortName.body.issues) && shortName.body.issues.length > 0, JSON.stringify(shortName.body));
   const dupReal = await mkSource({ rootUrl: 'https://www.goldensierra.com' });
   check('source: duplicate of an existing real source (www/trailing-slash variant) → 409', dupReal.status === 409 && dupReal.body.code === 'duplicate_source', JSON.stringify(dupReal.body));
 
   const jobsBeforeSrc = await prisma.ingestionJob.count();
-  const created = await mkSource({ rootUrl: 'http://127.0.0.1:4455/', startCrawl: false });
+  const created = await mkSource({ rootUrl: `https://goldensierra.com/http-test-${RUN}`, startCrawl: false });
   check('source: created with startCrawl:false → 201 and NO job queued', created.status === 201 && created.body.crawl === null && (await prisma.ingestionJob.count()) === jobsBeforeSrc, JSON.stringify(created.body).slice(0, 200));
   const srcId: string | undefined = created.body.source?.id;
   if (srcId) {
     sourceIds.push(srcId);
-    check('source: the same URL again → 409', (await mkSource({ rootUrl: 'http://127.0.0.1:4455' })).status === 409);
+    check('source: the same URL again → 409', (await mkSource({ rootUrl: `https://www.goldensierra.com/http-test-${RUN}/` })).status === 409);
     const list = (await call('/api/admin/sources', { cookie })).body.sources.find((x: any) => x.id === srcId);
     check('source list exposes enabled-state, doc state and retrieval readiness separately', list?.status === 'ACTIVE' && list?.documents?.indexed === 0 && list?.retrieval?.state === 'not_ready' && list?.lastJob === null, JSON.stringify(list));
     check('PATCH pause → 200', (await call(`/api/admin/sources/${srcId}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'PAUSED' }), cookie })).status === 200);

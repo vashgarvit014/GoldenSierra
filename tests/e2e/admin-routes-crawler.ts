@@ -114,7 +114,7 @@ const MODULES = [
     await page.locator('#urlInput').fill('https://example.com/');
     await page.locator('#addSourceBtn').click();
     await page.locator('#crawlerError').waitFor();
-    check('unauthorized host: the server error is shown', /not authorized/i.test(await page.locator('#crawlerError').innerText()), await page.locator('#crawlerError').innerText());
+    check('unauthorized host: the server error is shown', /not an authorized crawl host/i.test(await page.locator('#crawlerError').innerText()), await page.locator('#crawlerError').innerText());
     const sourcesAfterBad = await prisma.knowledgeSource.count();
     check('…and no source row was created', sourcesAfterBad === sourcesAtStart);
 

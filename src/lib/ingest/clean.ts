@@ -98,6 +98,10 @@ function countRaw(haystack: string, pattern: RegExp): number {
 export function detectAudience(url: string | null, title: string, text: string): Audience {
   const path = (url ?? '').toLowerCase();
   if (/job-seeker|jobseeker/.test(path)) return 'job_seeker';
+  // Participant success stories are written for prospective participants. They
+  // rarely use the keywords below, so without this they fell through to
+  // 'agency' and were hidden from job seekers by the audience filter.
+  if (/\/impact(\/|$)|success-stor/.test(path) || /\bsuccess story\b/i.test(title)) return 'job_seeker';
   if (/employer/.test(path)) return 'employer';
   if (
     /workforce-board|governing-body|public-notice|federal-funding|local-and-regional-plans|\/about|\/careers|\/sitemap|\/privacy|\/equal-opportunity/.test(

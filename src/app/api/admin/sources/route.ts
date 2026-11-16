@@ -4,7 +4,9 @@ import { AdminRole, JobType, SourceType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { AppError, badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
-import { isHostAllowed } from '@/lib/ingest/crawler';
+import { checkCrawlHost, explainHostRejection } from '@/lib/ingest/crawler';
+import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
 import { CRAWLABLE_TYPES, sourceKey } from '@/lib/ingest/sources';
 import { createJob } from '@/lib/ingest/pipeline';
 import { enqueueJob, queueHealth } from '@/lib/ingest/queue';
@@ -75,6 +77,7 @@ export const GET = withErrorHandling(async () => {
   };
 
   return NextResponse.json({
+    allowedHosts: env.CRAWL_ALLOWED_HOSTS,
     sources: sources.map((s) => {
       const docs = docsFor(s.id);
       return {
@@ -121,16 +124,24 @@ export const POST = withErrorHandling(async (request: Request) => {
     throw badRequest('A root URL is required for this source type');
   }
 
-  if (body.rootUrl && !/^https?:\/\//i.test(body.rootUrl)) {
-    throw badRequest('The source URL must start with http:// or https://');
-  }
-
   // The deployment-level allowlist is the final word on what may be crawled;
-  // an admin cannot widen it from the dashboard.
-  if (body.rootUrl && !isHostAllowed(body.rootUrl)) {
-    throw badRequest(
-      'That host is not authorized for crawling. Add it to CRAWL_ALLOWED_HOSTS and redeploy first.',
-    );
+  // an admin cannot widen it from the dashboard. Say exactly which host was
+  // read and what would be accepted, so a rejection is never a guessing game.
+  if (body.rootUrl) {
+    const verdict = checkCrawlHost(body.rootUrl);
+    if (!verdict.ok) {
+      logger.warn('Source rejected by crawl allowlist', {
+        host: verdict.host,
+        reason: verdict.reason,
+        allowed: verdict.allowed,
+      });
+      throw badRequest(explainHostRejection(verdict), {
+        reason: verdict.reason,
+        host: verdict.host,
+        allowedHosts: verdict.allowed,
+        suggestion: verdict.suggestion,
+      });
+    }
   }
 
   for (const pattern of [...body.includePatterns, ...body.excludePatterns]) {

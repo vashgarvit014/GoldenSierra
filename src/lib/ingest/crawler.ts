@@ -43,16 +43,79 @@ export type CrawlSummary = {
   errors: { url: string; reason: string }[];
 };
 
-export function isHostAllowed(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return env.CRAWL_ALLOWED_HOSTS.some((allowed) => {
-      const a = allowed.toLowerCase();
-      return host === a || host.endsWith(`.${a}`);
-    });
-  } catch {
-    return false;
+/** Lower-cased, without a root-label dot ("Example.COM." → "example.com"). */
+function canonicalHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/, '');
+}
+
+export type HostVerdict =
+  | { ok: true; host: string }
+  | {
+      ok: false;
+      /** The hostname exactly as the server read it, when the URL parsed at all. */
+      host: string | null;
+      reason: 'invalid_url' | 'bad_scheme' | 'not_listed';
+      allowed: string[];
+      /** An allowed host this one is probably a typo of. */
+      suggestion?: string;
+    };
+
+function editDistance(a: string, b: string): number {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0]!;
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = row[j]!;
+      row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
   }
+  return row[b.length]!;
+}
+
+/**
+ * Whether a URL's host is on the deployment allowlist, and if not, exactly why.
+ * A host matches an entry when it equals it or is a subdomain of it, so
+ * "goldensierra.com" covers "www.goldensierra.com" but never
+ * "evilgoldensierra.com" or "goldensierra.com.evil.com".
+ */
+export function checkCrawlHost(url: string, allowlist: readonly string[] = env.CRAWL_ALLOWED_HOSTS): HostVerdict {
+  const allowed = allowlist.map((h) => canonicalHost(h));
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, host: null, reason: 'invalid_url', allowed };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, host: canonicalHost(parsed.hostname), reason: 'bad_scheme', allowed };
+  }
+  const host = canonicalHost(parsed.hostname);
+  if (allowed.some((a) => host === a || host.endsWith(`.${a}`))) return { ok: true, host };
+
+  // A typo is usually in the name, not the TLD, so compare the registrable label too.
+  const label = (h: string) => h.replace(/^www\./, '').split('.').slice(-2, -1)[0] ?? h;
+  const suggestion = allowed.find(
+    (a) => editDistance(host.replace(/^www\./, ''), a.replace(/^www\./, '')) <= 2 || (label(host).length > 3 && editDistance(label(host), label(a)) <= 2),
+  );
+  return { ok: false, host, reason: 'not_listed', allowed, suggestion };
+}
+
+/** Human explanation of a rejected host, naming the host and what is allowed. */
+export function explainHostRejection(v: Extract<HostVerdict, { ok: false }>): string {
+  const list = v.allowed.join(', ') || '(none configured)';
+  if (v.reason === 'invalid_url') return 'That is not a valid URL. Enter the full address, for example https://goldensierra.com/.';
+  if (v.reason === 'bad_scheme') return 'The source URL must start with http:// or https://.';
+  return (
+    `"${v.host}" is not an authorized crawl host. Authorized hosts: ${list} (subdomains of these are included).` +
+    (v.suggestion ? ` Did you mean ${v.suggestion}?` : '') +
+    ' To crawl a different site, an administrator must add it to CRAWL_ALLOWED_HOSTS in the server environment and restart.'
+  );
+}
+
+export function isHostAllowed(url: string): boolean {
+  return checkCrawlHost(url).ok;
 }
 
 /** Normalizes a URL for dedupe: drops the hash, sorts tracking params away,

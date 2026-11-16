@@ -75,13 +75,15 @@ export function Crawler() {
   const canEdit = role === 'EDITOR' || role === 'ADMIN';
   const canDelete = role === 'ADMIN';
 
-  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[] }>('/api/admin/sources');
+  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[]; allowedHosts?: string[] }>('/api/admin/sources');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [queue, setQueue] = useState<QueueHealth | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
+  const [maxPages, setMaxPages] = useState(150);
+  const [maxDepth, setMaxDepth] = useState(3);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadJobs = useCallback(async () => {
@@ -157,8 +159,8 @@ export function Crawler() {
           name: label,
           type: 'WEBSITE',
           rootUrl: url.trim(),
-          maxPages: 150,
-          maxDepth: 3,
+          maxPages,
+          maxDepth,
           respectRobots: true,
           excludePatterns: ['/blog/document/', '/(es|ru|fa|uk)(/|$)', '/calendar(/|$)'],
           startCrawl: true,
@@ -178,6 +180,8 @@ export function Crawler() {
       }
       setUrl('');
       setName('');
+      setMaxPages(150);
+      setMaxDepth(3);
       await Promise.all([loadJobs(), reloadSources()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add the source');
@@ -279,10 +283,24 @@ export function Crawler() {
               {busy === 'add' ? <span className="spin" /> : '＋'} &nbsp; Add source &amp; crawl
             </button>
           </form>
-          <p className="info-note" style={{ marginTop: 10 }}>
-            Saving a source queues its first crawl automatically. The crawler respects robots.txt,
-            rate-limits itself, and never attempts to bypass a login. A host that is not in{' '}
-            <code>CRAWL_ALLOWED_HOSTS</code> is rejected by the server.
+          <details style={{ marginTop: 10 }}>
+            <summary className="fine" style={{ cursor: 'pointer' }}>Crawl limits (optional)</summary>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+              <label className="fine">
+                Max pages{' '}
+                <input id="maxPagesInput" type="number" min={1} max={2000} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} style={{ width: 100 }} />
+              </label>
+              <label className="fine">
+                Link depth{' '}
+                <input id="maxDepthInput" type="number" min={0} max={6} value={maxDepth} onChange={(e) => setMaxDepth(Math.max(0, Number(e.target.value) || 0))} style={{ width: 80 }} />
+              </label>
+            </div>
+          </details>
+          <p className="info-note" id="allowedHostsNote" style={{ marginTop: 10 }}>
+            <b>Authorized hosts:</b>{' '}
+            {sourceData?.allowedHosts?.length ? sourceData.allowedHosts.join(', ') : 'loading…'}{' '}
+            (their subdomains are included). Saving a source queues its first crawl automatically. The crawler respects robots.txt,
+            rate-limits itself, and never attempts to bypass a login. Any other host is rejected by the server, which names the host it read and what would be accepted.
           </p>
         </div>
       )}
