@@ -42,10 +42,13 @@ const PIPELINE = [
   { icon: '✓', label: 'Index' },
 ];
 
+type QueueHealth = { enabled: boolean; waiting: number; active: number; workers: number };
+
 export function Crawler() {
   const { notify } = useConsole();
   const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[] }>('/api/admin/sources');
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [queue, setQueue] = useState<QueueHealth | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [url, setUrl] = useState('');
@@ -55,8 +58,9 @@ export function Crawler() {
   async function loadJobs() {
     const res = await fetch('/api/admin/ingestion/status');
     if (!res.ok) return;
-    const body = (await res.json()) as { jobs: Job[] };
+    const body = (await res.json()) as { jobs: Job[]; queue?: QueueHealth | null };
     setJobs(body.jobs);
+    setQueue(body.queue ?? null);
   }
 
   useEffect(() => {
@@ -264,6 +268,20 @@ export function Crawler() {
           <h2>Ingestion Jobs</h2>
           <span className="fine">{active ? 'Live — refreshing every 3s' : 'Idle'}</span>
         </div>
+
+        {/* Work waiting with nobody to consume it looks identical to work about
+            to start. Say so, rather than letting it read as progress. */}
+        {queue?.enabled && queue.workers === 0 && queue.waiting > 0 && (
+          <div className="empty warn" style={{ textAlign: 'left' }}>
+            <b>
+              {queue.waiting} job{queue.waiting === 1 ? '' : 's'} waiting, no worker running.
+            </b>
+            <div className="fine" style={{ marginTop: 4 }}>
+              REDIS_URL is set, so jobs are handed to the queue instead of running in-process.
+              Start the consumer with <code>npm run ingest:worker</code>.
+            </div>
+          </div>
+        )}
 
         {jobs.length === 0 && <div className="empty">No jobs yet.</div>}
 

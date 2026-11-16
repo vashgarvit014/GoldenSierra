@@ -5,6 +5,7 @@ import { withErrorHandling } from '@/lib/errors';
 import { requireAdmin } from '@/lib/auth';
 import { auditIndex } from '@/lib/ingest/pipeline';
 import { collectionStats } from '@/lib/vector/qdrant';
+import { queueHealth } from '@/lib/ingest/queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ export const GET = withErrorHandling(async (request: Request) => {
     return NextResponse.json({ job: serializeJob(job) });
   }
 
-  const [jobs, vector, index] = await Promise.all([
+  const [jobs, vector, index, queue] = await Promise.all([
     prisma.ingestionJob.findMany({
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -31,12 +32,14 @@ export const GET = withErrorHandling(async (request: Request) => {
     }),
     collectionStats(),
     auditIndex(),
+    queueHealth(),
   ]);
 
   return NextResponse.json({
     jobs: jobs.map(serializeJob),
     vector,
     index,
+    queue,
   });
 });
 

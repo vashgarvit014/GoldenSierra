@@ -66,8 +66,19 @@ export async function enqueueJob(jobId: string): Promise<{ mode: 'queued' | 'inl
   const queue = await getQueue();
 
   if (queue) {
-    await queue.add('run', { jobId });
-    return { mode: 'queued' };
+    try {
+      await queue.add('run', { jobId });
+      return { mode: 'queued' };
+    } catch (err) {
+      // The connection can drop between constructing the queue and pushing to
+      // it, and enableOfflineQueue:false makes that a rejection rather than a
+      // wait. The job row already exists, so failing here would strand it as
+      // QUEUED forever and block the source's next crawl. Run it in-process.
+      logger.warn('Could not push to ingestion queue; running in-process', {
+        jobId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   if (running.has(jobId)) return { mode: 'inline' };
@@ -89,4 +100,41 @@ export async function enqueueJob(jobId: string): Promise<{ mode: 'queued' | 'inl
 
 export function isRunningInline(jobId: string): boolean {
   return running.has(jobId);
+}
+
+/**
+ * Whether work is waiting with nothing to consume it.
+ *
+ * A job sitting at QUEUED is indistinguishable, from the database alone, from
+ * one that is about to start. Asking the queue who is listening is what makes
+ * "stuck" visible instead of silent.
+ */
+export async function queueHealth(): Promise<{
+  enabled: boolean;
+  waiting: number;
+  active: number;
+  workers: number;
+} | null> {
+  const queue = (await getQueue()) as
+    | (QueueLike & {
+        getJobCounts: () => Promise<Record<string, number>>;
+        getWorkers: () => Promise<unknown[]>;
+      })
+    | null;
+  if (!queue) return { enabled: false, waiting: 0, active: 0, workers: 0 };
+
+  try {
+    const [counts, workers] = await Promise.all([queue.getJobCounts(), queue.getWorkers()]);
+    return {
+      enabled: true,
+      waiting: counts.waiting ?? 0,
+      active: counts.active ?? 0,
+      workers: workers.length,
+    };
+  } catch (err) {
+    logger.warn('Could not read ingestion queue health', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
