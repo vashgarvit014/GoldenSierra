@@ -40,8 +40,14 @@ const PERSONAL_ASK = new RegExp(
 );
 
 /** A statement of the person's circumstances or need. */
-const PERSONAL_STATEMENT =
-  /\b(?:i am|i'm|im|i've|i have|i need|i want|i'd like|i would like|i'm looking|looking for|help me|we need|we are|we're|we have|my (?:situation|resume|business|company|team|career|job|family))\b/i;
+const PERSONAL_STATEMENT = new RegExp(
+  [
+    String.raw`\b(?:i am|i'm|im|i've|i have|i need|i want|i'd like|i would like|i'm looking|looking for|help me|we need|we are|we're|we have|my (?:situation|resume|business|company|team|career|job|family))\b`,
+    // Someone describing the person they are helping: "She is 19 and needs a job", "My client was laid off".
+    String.raw`\b(?:she|he|they|my (?:client|son|daughter|friend|brother|sister|student))(?:'s| is| are| was| has| have| needs?| wants?| lives?| can't| cannot| doesn't| does not| hasn't| has not)\b`,
+  ].join('|'),
+  'i',
+);
 
 const sentencesOf = (text: string) => text.match(/[^.!?]+[.!?]*/g)?.map((s) => s.trim()).filter(Boolean) ?? [text];
 

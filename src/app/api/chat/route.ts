@@ -11,14 +11,21 @@ import {
   loadSession,
   updateProfile,
 } from '@/lib/session';
-import { completeTurn, prepareTurn, streamAnswer } from '@/lib/rag/generate';
-import type { AssistantPayload } from '@/types/chat';
+import { completeTurn, prepareTurn, streamAnswer, type PreparedTurn } from '@/lib/rag/generate';
+import { routeMessage } from '@/lib/rag/routing';
+import { lookupFlowPayload, readFlow, runGuidedTurn } from '@/lib/conversation/flow';
+import type { AssistantPayload, UserProfile } from '@/types/chat';
+import type { FlowState } from '@/types/flow';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/chat
+ *
+ * Factual questions are answered by the strict document pipeline; personal workforce situations go
+ * through the guided conversation (src/lib/conversation/flow.ts). Both return the same payload, with
+ * the structured conversation state in `payload.flow`.
  *
  * Streams an answer as newline-delimited JSON events:
  *   {"type":"meta",  ...}   once, before generation: intent, recommendations, sources
@@ -34,7 +41,11 @@ const BodySchema = z.object({
   message: z.string().min(1, 'Please enter a question').max(env.MAX_MESSAGE_CHARS),
   sessionToken: z.string().min(16).max(256),
   stream: z.boolean().optional().default(true),
+  /** "Show results now" — recommendations from what is known so far. */
+  forceResults: z.boolean().optional(),
 });
+
+type Produced = { answer: string; payload: AssistantPayload; prepared: PreparedTurn | null; profile: UserProfile & { flow: FlowState } };
 
 export const POST = withErrorHandling(async (request: Request) => {
   const ip = clientIpFrom(request);
@@ -53,39 +64,45 @@ export const POST = withErrorHandling(async (request: Request) => {
     .trim();
   if (!message) throw badRequest('Please enter a question');
 
-  const { session, profile, history } = await loadSession(body.sessionToken);
+  const { session, profile: storedProfile, history } = await loadSession(body.sessionToken);
+  // Guided-conversation state lives with the session (per user/session, never in the vector store).
+  const { flow: storedFlow, ...profile } = storedProfile as UserProfile & { flow?: unknown };
+  const flow = readFlow(storedFlow);
 
   const started = Date.now();
   await appendUserMessage(session.id, message);
 
-  const prepared = await prepareTurn({ message, history, profile, sessionId: session.id });
-  await updateProfile(session.id, prepared.profile);
+  // A direct factual question is answered from the documents; a personal situation (or a reply to
+  // the assistant's own question once a guided conversation is under way) goes through the guided flow.
+  const route = body.forceResults
+    ? ({ kind: 'personal' } as const)
+    : routeMessage(message, { fallback: flow.stage === 'START' ? 'factual' : 'personal' });
 
-  const meta = {
-    type: 'meta' as const,
-    intent: prepared.payloadBase.intent,
-    confidence: prepared.payloadBase.confidence,
-    // Evidence is only shown once the answer has been verified against it.
-    recommendations: [] as typeof prepared.payloadBase.recommendations,
-    sources: [] as typeof prepared.payloadBase.sources,
-    citations: [] as typeof prepared.payloadBase.citations,
-    conflicts: prepared.payloadBase.conflicts,
-    profile: prepared.profile,
+  const produce = async (): Promise<Produced> => {
+    if (route.kind === 'personal') {
+      const guided = await runGuidedTurn({ message, history, flow, forceResults: body.forceResults });
+      return { answer: guided.answer, payload: guided.payload, prepared: guided.prepared, profile: { ...profile, flow: guided.flow } };
+    }
+    const prepared = await prepareTurn({ message, history, profile, sessionId: session.id });
+    let raw = '';
+    for await (const token of streamAnswer(prepared)) raw += token;
+    const { answer, payload } = await completeTurn(prepared, raw, message, started);
+    payload.flow = lookupFlowPayload(flow, route.kind === 'smalltalk' ? 'smalltalk' : 'factual');
+    return { answer, payload, prepared, profile: { ...prepared.profile, flow } };
+  };
+
+  const finish = async (out: Produced) => {
+    await updateProfile(session.id, out.profile as UserProfile);
+    const saved = await appendAssistantMessage(session.id, out.answer, out.payload, { latencyMs: out.payload.latencyMs });
+    if (out.prepared) await logRetrieval(session.id, saved.id, message, out.prepared, out.payload, started);
+    return saved;
   };
 
   // ── Non-streaming path (used by the admin console and the eval harness) ──
   if (!body.stream) {
-    let raw = '';
-    for await (const token of streamAnswer(prepared)) raw += token;
-
-    const { answer, payload } = await completeTurn(prepared, raw, message, started);
-
-    const saved = await appendAssistantMessage(session.id, answer, payload, {
-      latencyMs: payload.latencyMs,
-    });
-    await logRetrieval(session.id, saved.id, message, prepared, payload, started);
-
-    return NextResponse.json({ messageId: saved.id, answer, payload });
+    const out = await produce();
+    const saved = await finish(out);
+    return NextResponse.json({ messageId: saved.id, answer: out.answer, payload: out.payload });
   }
 
   // ── Streaming path ──
@@ -97,23 +114,14 @@ export const POST = withErrorHandling(async (request: Request) => {
       };
 
       try {
-        send(meta);
-
+        // Evidence is only shown once the answer has been verified against it.
+        send({ type: 'meta', recommendations: [], sources: [], citations: [], conflicts: [] });
         // Buffered, not streamed: the text is verified against the retrieved
         // chunks first, so nothing unsupported is ever shown, even briefly.
-        let raw = '';
-        for await (const token of streamAnswer(prepared)) raw += token;
-
-        const { answer, payload } = await completeTurn(prepared, raw, message, started);
-
-        const saved = await appendAssistantMessage(session.id, answer, payload, {
-          latencyMs: payload.latencyMs,
-        });
-
-        send({ type: 'token', value: answer });
-        send({ type: 'done', messageId: saved.id, answer, payload });
-
-        await logRetrieval(session.id, saved.id, message, prepared, payload, started);
+        const out = await produce();
+        const saved = await finish(out);
+        send({ type: 'token', value: out.answer });
+        send({ type: 'done', messageId: saved.id, answer: out.answer, payload: out.payload });
       } catch (err) {
         logger.error('Chat stream failed', {
           error: err instanceof Error ? err.message : String(err),
@@ -144,7 +152,7 @@ async function logRetrieval(
   sessionId: string,
   messageId: string,
   query: string,
-  prepared: Awaited<ReturnType<typeof prepareTurn>>,
+  prepared: PreparedTurn,
   payload: AssistantPayload,
   started: number,
 ): Promise<void> {

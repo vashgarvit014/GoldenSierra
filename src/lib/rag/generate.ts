@@ -91,6 +91,8 @@ export type PreparedTurn = {
    */
   preAnswer: string | null;
   diagnostics: TurnDiagnostics;
+  /** Set by the guided conversation, which asks its own follow-up question. */
+  skipFollowUps?: boolean;
 };
 
 const TEXT_PREVIEW = 700;
@@ -465,7 +467,7 @@ export async function completeTurn(
 
   // Follow-up suggestions only make sense for guidance; a lookup stays a lookup.
   const followUps =
-    answered && prepared.mode === 'guidance' ? await generateFollowUps(message, finalized.answer, prepared.analysis) : [];
+    answered && prepared.mode === 'guidance' && !prepared.skipFollowUps ? await generateFollowUps(message, finalized.answer, prepared.analysis) : [];
 
   const payload: AssistantPayload = {
     ...prepared.payloadBase,

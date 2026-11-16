@@ -90,7 +90,7 @@ export function ChatPage() {
   }, [turns, streaming]);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, forceResults = false) => {
       const q = text.trim();
       if (!q || sending || !session.current) return;
 
@@ -108,7 +108,7 @@ export function ChatPage() {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: q, sessionToken: session.current.token, stream: true }),
+          body: JSON.stringify({ message: q, sessionToken: session.current.token, stream: true, ...(forceResults ? { forceResults: true } : {}) }),
         });
         if (!res.ok || !res.body) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -178,6 +178,10 @@ export function ChatPage() {
   );
 
   const empty = turns.length === 0 && !streaming;
+  // The structured state of the latest assistant turn drives quick replies and the results option.
+  const flow = [...turns].reverse().find((t) => t.role === 'assistant')?.payload?.flow ?? null;
+  const quickReplies = flow?.quickReplies ?? [];
+  const offerResults = Boolean(flow?.canShowResults && (flow.stage === 'DISCOVERING_NEEDS' || flow.stage === 'CLARIFYING'));
 
   return (
     <>
@@ -219,9 +223,10 @@ export function ChatPage() {
                   </div>
                   <h2>How can I help you today?</h2>
                   <p>
-                    Ask a question. Answers come only from the documents indexed in the knowledge
-                    base, with their sources attached — if the knowledge base does not cover it,
-                    I will say so.
+                    Ask a question, or describe your situation and I&apos;ll ask a few short questions
+                    before suggesting options. Facts come only from the documents indexed in the
+                    knowledge base, with their sources attached — if it does not cover something, I
+                    will say so.
                   </p>
                 </div>
                 <div className="prompts" id="prompts">
@@ -267,7 +272,26 @@ export function ChatPage() {
           </div>
 
           <div className="chat-composer">
-            {!sending && suggestions.length > 0 && !empty && (
+            {!sending && (quickReplies.length > 0 || offerResults) && (
+              <div className="sources" style={{ marginBottom: 10 }} data-testid="quick-replies">
+                {quickReplies.map((r) => (
+                  <button key={r.value} className="source-chip" data-testid="quick-reply" onClick={() => void send(r.value)}>
+                    {r.label}
+                  </button>
+                ))}
+                {offerResults && (
+                  <button
+                    className="source-chip"
+                    data-testid="show-results"
+                    title="Show options from what you've shared so far"
+                    onClick={() => void send('Show me the options you have so far', true)}
+                  >
+                    ➜ Show results now
+                  </button>
+                )}
+              </div>
+            )}
+            {!sending && quickReplies.length === 0 && !offerResults && suggestions.length > 0 && !empty && (
               <div className="sources" style={{ marginBottom: 10 }}>
                 {suggestions.slice(0, 3).map((s) => (
                   <button key={s} className="source-chip" onClick={() => void send(s)}>
@@ -321,7 +345,7 @@ export function ChatPage() {
 
         <aside className="chat-side">
           <div className="side-card">
-            <h3>This conversation</h3>
+            <h3>What I know so far</h3>
             <ConversationFacts turns={turns} live={liveMeta} />
           </div>
 
@@ -361,6 +385,30 @@ function ConversationFacts({
 }) {
   const latest = live ?? [...turns].reverse().find((t) => t.payload)?.payload ?? null;
   if (!latest) return <p className="info-note">Nothing inferred yet — ask a question.</p>;
+
+  // Guided conversation: what the user has told us, in their terms. Corrections replace old values.
+  const known = Object.entries(latest.flow?.knownFacts ?? {});
+  if (latest.flow && (known.length > 0 || latest.flow.route === 'personal')) {
+    return (
+      <div data-testid="known-facts">
+        <div className="system-item">
+          <span>Stage</span>
+          <span className="tag">{latest.flow.stage.replace(/_/g, ' ').toLowerCase()}</span>
+        </div>
+        {known.map(([key, value]) => (
+          <div className="system-item" key={key}>
+            <span>{key.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
+            <span className="muted">{value}</span>
+          </div>
+        ))}
+        {known.length === 0 && (
+          <p className="info-note" style={{ marginTop: 10 }}>
+            Nothing shared yet. Only what you volunteer is kept, for this conversation only.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   const profile = latest.profile ?? {};
   const entries = Object.entries(profile).filter(([, v]) => v != null && v !== '');
@@ -469,8 +517,10 @@ function AssistantMessage({ turn }: { turn: ChatTurn }) {
         </div>
 
         {payload?.recommendations?.map((r) => (
-          <div className="rec" key={r.slug ?? r.name}>
-            <h4>{r.name}</h4>
+          <div className="rec" key={r.slug ?? r.name} data-testid="rec-card">
+            <h4>
+              {r.name} {r.category?.startsWith('Source') && <span className="tag">{r.category}</span>}
+            </h4>
             <p>{r.shortDescription}</p>
             <div className="why">
               <b>Why this fits:</b> {r.whyRelevant}

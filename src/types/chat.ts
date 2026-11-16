@@ -2,6 +2,7 @@
  * Shared contract between the RAG pipeline, the API layer and the UI.
  * Kept free of server-only imports so client components can use it.
  */
+import type { FlowPayload } from './flow';
 
 export const INTENTS = [
   'find_job',
@@ -203,6 +204,8 @@ export type AssistantPayload = {
   /** Present when the assistant needs one more detail to be useful. */
   clarifyingQuestion: string | null;
   latencyMs: number;
+  /** Structured conversation state (admin chat guided flow). */
+  flow?: FlowPayload;
 };
 
 export type ChatTurn = {

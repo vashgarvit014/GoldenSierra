@@ -133,7 +133,7 @@ export const QUESTIONS: Question[] = [
     field: 'incomeUrgency',
     baseValue: 0.75,
     prompt: (mode) =>
-      `Last thing: ${s(mode).pronoun === 'you' ? 'do you' : 'do they'} need income coming in soon, or is there room to train first?`,
+      `${s(mode).pronoun === 'you' ? 'Do you' : 'Do they'} need income coming in soon, or is there room to train first?`,
     quickReplies: () => [
       { label: 'Needs income now', value: 'Needs income as soon as possible' },
       { label: 'Can train first', value: 'Can focus on training for a few months' },

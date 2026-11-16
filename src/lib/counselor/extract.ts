@@ -56,6 +56,9 @@ export function ruleExtract(message: string, ctx: CounselorContext): Partial<Cou
   const text = message.trim();
   const lower = text.toLowerCase();
 
+  // ── Who the conversation is about ── (asking on someone else's behalf → "they", never "you")
+  if (/\b(i'?m|i am|we'?re|we are)\s+(helping|assisting|supporting|working with|asking (for|on behalf of))\b|\bon behalf of\b|\bmy (client|son|daughter|nephew|niece|brother|sister|friend|student|mentee)\b/i.test(text)) out.mode = 'helper';
+
   // ── Age ──
   const ageMatch =
     /\b(\d{1,2})[- ]?(?:year|yr)s?[- ]?old\b/i.exec(text) ??
@@ -90,20 +93,20 @@ export function ruleExtract(message: string, ctx: CounselorContext): Partial<Cou
   for (const [pattern, tag] of POPULATION_PATTERNS) if (pattern.test(text)) pops.add(tag);
   if (pops.size) out.population = [...pops];
 
-  // ── Education ──
-  if (/\b(ged|hiset|high school)\b.*\b(complete|finished|done|has|got)\b/i.test(text)) out.education = 'ged_or_hs';
+  // ── Education ── (negation first: "hasn't completed her GED. She has…" must not read as completed)
+  if (/\b(hasn'?t|has not|have not|haven'?t|didn'?t|did not|not|never|no|without)\b.{0,30}\b(ged|hiset|high school|diploma)\b|\b(ged|diploma)\s+(is\s+)?(incomplete|unfinished|not (done|finished|complete))/i.test(text)) out.education = 'no_hs_diploma';
   else if (/\b(working on|still doing|studying for|in progress).{0,20}\b(ged|hiset|diploma)\b/i.test(text)) out.education = 'working_on_ged';
-  else if (/\b(hasn'?t|has not|not|never|no|without)\b.{0,30}\b(ged|hiset|high school|diploma)\b/i.test(text)) out.education = 'no_hs_diploma';
+  else if (/\b(ged|hiset|high school)\b.{0,30}\b(completed?|finished|done|passed)\b|\b(completed?|finished|passed|got|has|have)\s+(her|his|their|my)?\s*(ged|hiset|high school diploma|high school|diploma)\b/i.test(text)) out.education = 'ged_or_hs';
   else if (/\bsome college\b/i.test(text)) out.education = 'some_college';
   else if (/\b(degree|bachelor|associate)\b/i.test(text)) out.education = 'degree';
 
   // ── Transportation ──
   if (/\bno (reliable )?(transport|car|vehicle|way to get)|can'?t drive|doesn'?t drive|without a car\b/i.test(text)) out.transportation = 'none';
   else if (/\b(bus|transit|public transport)( only)?\b/i.test(text)) out.transportation = 'transit_only';
-  else if (/\bhas a car|own car|can drive|own vehicle|reliable transport\b/i.test(text)) out.transportation = 'own_vehicle';
+  else if (/\b(has|have|got) (a |her |his |their |my )?(car|vehicle)\b|own car|can drive|own vehicle|reliable transport\b/i.test(text)) out.transportation = 'own_vehicle';
 
   // ── Income urgency ──
-  if (/\bneeds? (income|money|a job|work) (now|soon|right away|asap)|income as soon|urgent\b/i.test(text)) out.incomeUrgency = 'immediate';
+  if (/\bneeds? (income|money|a job|work|to earn) (now|soon|right away|asap|quickly|immediately)|income as soon|\burgent(ly)?\b|as soon as possible|right away|immediately/i.test(text)) out.incomeUrgency = 'immediate';
   else if (/\bcan (focus on |do )?train|train first|few months|no rush\b/i.test(text)) out.incomeUrgency = 'can_train_first';
   else if (/\bopen to (both|either)\b/i.test(text)) out.incomeUrgency = 'flexible';
 
@@ -230,9 +233,12 @@ export async function extractContext(
       merged.age = data.age;
       merged.ageBand = data.age < 18 ? 'under_18' : data.age < 25 ? '18_24' : data.age < 55 ? '25_54' : '55_plus';
     }
+    // Location is only taken from the model when the message actually names a place — it otherwise
+    // "remembers" or guesses one (a correction about a car once moved the person to another county).
+    const namesPlace = /\bcounty\b|placer|el\s*dorado|alpine/i.test(message) || Object.keys(CITY_TO_COUNTY).some((c) => message.toLowerCase().includes(c));
     const county = normaliseCounty(data.county);
-    if (county) merged.county = county;
-    if (data.city) merged.city = data.city.toLowerCase();
+    if (county && namesPlace) merged.county = county;
+    if (data.city && message.toLowerCase().includes(data.city.toLowerCase())) merged.city = data.city.toLowerCase();
     if (data.careerInterest) {
       const cleaned = cleanInterest(data.careerInterest);
       if (cleaned.length >= 3) merged.careerInterest = cleaned;
@@ -292,7 +298,17 @@ export function mergeContext(
       (next[key] as unknown) = value;
     }
   }
+  // A corrected answer must not leave its old consequence behind ("no car" → "has a car").
+  if (next.transportation && next.transportation !== 'none') {
+    next.barriers = (next.barriers ?? []).filter((b) => b !== 'transportation');
+  }
   return next;
+}
+
+/** Scalar fields whose earlier value this turn replaced — a correction, not new information. */
+export function changedFields(before: CounselorContext, after: CounselorContext): string[] {
+  const keys: (keyof CounselorContext)[] = ['age', 'county', 'city', 'careerInterest', 'education', 'employmentStatus', 'transportation', 'incomeUrgency', 'audience'];
+  return keys.filter((k) => before[k] !== undefined && before[k] !== null && after[k] !== before[k]);
 }
 
 function normaliseCounty(value: string | null | undefined) {
