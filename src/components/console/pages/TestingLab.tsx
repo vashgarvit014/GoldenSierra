@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Head } from '../Console';
 import { Markdown } from '@/components/chat/Markdown';
-import type { Citation, Recommendation } from '@/types/chat';
+import type { Citation, Recommendation, TurnDiagnostics } from '@/types/chat';
 
 /**
  * The RAG testing lab.
@@ -32,7 +32,10 @@ type TestResult = {
   citations: Citation[];
   conflicts: { topic: string; description: string }[];
   followUpSuggestions: string[];
+  diagnostics?: TurnDiagnostics;
   retrievedSources: {
+    chunkId?: string;
+    similarity?: number | null;
     title: string;
     url: string | null;
     headingPath: string | null;
@@ -220,6 +223,8 @@ export function TestingLab() {
             </div>
           </div>
 
+          {result.diagnostics && <Diagnostics d={result.diagnostics} />}
+
           <div className="panel" style={{ marginTop: 20 }}>
             <div className="panel-head">
               <h2>Retrieved passages ({result.retrievedSources.length})</h2>
@@ -228,8 +233,8 @@ export function TestingLab() {
 
             {result.retrievedSources.length === 0 ? (
               <div className="empty">
-                Nothing retrieved — the answer could not be grounded. Check that content is indexed
-                for this topic, and that the audience filter is not excluding it.
+                Nothing passed the evidence checks — see the no-answer reason above. Check that content
+                about this topic is indexed.
               </div>
             ) : (
               result.retrievedSources.map((s, i) => (
@@ -239,6 +244,8 @@ export function TestingLab() {
                     <b style={{ fontSize: 12 }}>{s.title}</b>
                     {s.category && <span className="tag">{s.category}</span>}
                     <span className="tiny" style={{ marginLeft: 'auto' }}>
+                      {s.chunkId && <>chunk {s.chunkId} · </>}
+                      {s.similarity != null && <>similarity {s.similarity.toFixed(3)} · </>}
                       score {s.score.toFixed(4)}
                       {s.rerankScore != null && ` · rerank ${s.rerankScore.toFixed(4)}`}
                     </span>
@@ -292,6 +299,116 @@ function Row({ term, value }: { term: string; value: string }) {
       <span className="muted" style={{ textAlign: 'right', wordBreak: 'break-word' }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+
+const STATUS_LABEL: Record<string, string> = {
+  used: 'used',
+  not_selected: 'not selected',
+  below_relevance: 'below relevance',
+  rejected_not_in_postgres: 'rejected · not in PostgreSQL',
+  rejected_document_mismatch: 'rejected · document mismatch',
+  rejected_document_state: 'rejected · document state',
+  rejected_not_public: 'rejected · not public',
+  rejected_stale_vector: 'rejected · stale vector',
+  rejected_stale_content: 'rejected · stale content',
+};
+
+/** Why the answer is what it is: query, routing, filters, every candidate chunk and its fate, citations. */
+function Diagnostics({ d }: { d: TurnDiagnostics }) {
+  const used = d.candidates.filter((c) => c.status === 'used').length;
+  return (
+    <div className="panel" style={{ marginTop: 20 }} data-testid="diagnostics">
+      <div className="panel-head">
+        <h2>Retrieval diagnostics</h2>
+        <span className="fine">
+          {d.candidates.length} candidates · {used} used
+        </span>
+      </div>
+
+      {d.noAnswerReason && (
+        <div className="callout" data-testid="no-answer-reason">
+          <b>No answer from evidence:</b> <code>{d.noAnswerReason}</code>
+        </div>
+      )}
+
+      <Row term="User query" value={d.query} />
+      <Row term="Detected intent" value={`${d.intent} → handled as ${d.mode === 'factual' ? 'a direct lookup' : 'personal guidance'}`} />
+      <Row term="Searched as" value={d.rewrittenQuery} />
+      <Row term="Query terms" value={d.queryTerms.join(', ') || '—'} />
+      <Row term="Applied filters" value={JSON.stringify(d.filters)} />
+      <Row
+        term="Relevance rules"
+        value={`≥${Math.round(d.thresholds.minLexicalCoverage * 100)}% of query terms present, or similarity ≥${d.thresholds.semanticOverride}; model relevance ≥${d.thresholds.minLlmRelevance}/10 (rerank: ${d.rerankStrategy ?? 'none'})`}
+      />
+
+      <h3 style={{ margin: '16px 0 6px', fontSize: 14 }}>Citation mapping</h3>
+      {d.citationMap.length === 0 ? (
+        <p className="tiny" data-testid="citation-map-empty">No citations — nothing in the answer is attributed to a source.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table" data-testid="citation-map">
+            <thead><tr><th>Cited as</th><th>Document</th><th>Chunk IDs that support it</th></tr></thead>
+            <tbody>
+              {d.citationMap.map((c) => (
+                <tr key={c.n}>
+                  <td>[{c.n}]</td>
+                  <td><b>{c.title}</b><br /><span className="fine">{c.url}</span></td>
+                  <td className="fine">{c.chunkIds.join(', ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {d.unsupportedSentences.length > 0 && (
+        <div className="err" style={{ marginTop: 10 }} data-testid="unsupported-removed">
+          <b>Removed from the answer (not supported by any retrieved chunk):</b>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {d.unsupportedSentences.map((u, i) => <li key={i}>{u}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <h3 style={{ margin: '16px 0 6px', fontSize: 14 }}>Candidate chunks</h3>
+      <div className="table-wrap">
+        <table className="table" data-testid="candidates">
+          <thead>
+            <tr><th>Result</th><th>Document / chunk</th><th>Similarity</th><th>Terms</th><th>Model</th></tr>
+          </thead>
+          <tbody>
+            {d.candidates.map((c) => (
+              <tr key={c.chunkId} data-status={c.status}>
+                <td>
+                  <span className={`status ${c.status === 'used' ? 'done' : c.status.startsWith('rejected') ? 'failed' : c.status === 'below_relevance' ? 'warn' : 'queued'}`}>
+                    {STATUS_LABEL[c.status] ?? c.status}
+                  </span>
+                  {c.reason && <div className="fine">{c.reason}</div>}
+                </td>
+                <td>
+                  <b>{c.title}</b>
+                  {c.headingPath && <span className="fine"> · {c.headingPath}</span>}
+                  <br />
+                  <span className="fine">{c.url}</span>
+                  <br />
+                  <span className="fine">chunk {c.chunkId}</span>
+                  <details>
+                    <summary className="fine" style={{ cursor: 'pointer' }}>retrieved text</summary>
+                    <p className="tiny">{c.text}</p>
+                  </details>
+                </td>
+                <td>{c.similarity != null ? c.similarity.toFixed(3) : '—'}</td>
+                <td>{Math.round(c.lexicalCoverage * 100)}%</td>
+                <td>{c.llmRelevance ?? '—'}</td>
+              </tr>
+            ))}
+            {d.candidates.length === 0 && <tr><td colSpan={5} className="fine">The vector store returned no candidates.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -93,12 +93,18 @@ export const POST = withErrorHandling(async (request: Request) => {
       sourceId: s.sourceId ?? null,
       headingPath: s.headingPath,
       category: s.category,
+      chunkId: s.chunkId,
+      documentId: s.documentId,
+      similarity: s.similarity ?? null,
       score: Number(s.score.toFixed(4)),
       rerankScore: s.rerankScore != null ? Number(s.rerankScore.toFixed(4)) : null,
       lastVerified: s.lastVerified,
       snippet: s.snippet.slice(0, 400),
     })),
     usage: result.usage,
+    // Why the answer is what it is: query, intent, filters, every candidate chunk with
+    // its similarity and verdict, the citation → chunk mapping, and any no-answer reason.
+    diagnostics: result.diagnostics,
     latencyMs: Date.now() - started,
   });
 });

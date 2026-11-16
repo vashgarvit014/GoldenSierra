@@ -10,26 +10,41 @@ import {
   OFF_TOPIC_INSTRUCTION,
   RESPONSE_STYLE,
   SYSTEM_PROMPT,
+  STRICT_FACTUAL_PROMPT,
+  STRICT_GUIDANCE_ADDENDUM,
   structuredTokenBudget,
   buildContextBlock,
   buildProfileBlock,
   buildProgramBlock,
 } from '../ai/prompts';
 import {
-  buildCitations,
   checkGrounding,
   deduplicateSources,
   detectConflicts,
   prioritizeByFreshness,
-  reconcileCitations,
   softenOverclaims,
   type GroundingReport,
 } from './consolidate';
 import { analyzeQuery, mergeProfile } from './understand';
-import { retrieve, retrieveStructuredPrograms, verifySourcesAreLive } from './retrieve';
+import { retrieve, retrieveStructuredPrograms } from './retrieve';
+import {
+  KB_UNAVAILABLE_TEXT,
+  NO_ANSWER_TEXT,
+  SMALL_TALK_TEXT,
+  THRESHOLDS,
+  contentTerms,
+  isGuidanceRequest,
+  isSmallTalk,
+  relevanceGate,
+  outsideKnowledgeBase,
+  profileTerms,
+  validateChunks,
+  verifyAnswer,
+} from './strict';
+import { collectionStats } from '../vector/qdrant';
 import { rerank } from './rerank';
 import { matchPrograms, toRecommendations } from '../programs/matching';
-import type { AssistantPayload, ChatTurn, QueryAnalysis, UserProfile } from '@/types/chat';
+import type { AssistantPayload, CandidateStatus, ChatTurn, QueryAnalysis, RetrievedSource, TurnDiagnostics, UserProfile } from '@/types/chat';
 
 /**
  * The orchestrator for a single assistant turn:
@@ -58,6 +73,7 @@ export type GenerateResult = {
   analysis: QueryAnalysis;
   grounding: GroundingReport;
   usage: { promptTokens?: number; completionTokens?: number };
+  diagnostics?: TurnDiagnostics;
 };
 
 /** Shared preparation for both streaming and non-streaming paths. */
@@ -68,56 +84,253 @@ export type PreparedTurn = {
   payloadBase: Omit<AssistantPayload, 'latencyMs' | 'grounded'>;
   usedSources: AssistantPayload['sources'];
   timings: Record<string, number>;
+  mode: 'factual' | 'guidance';
+  /**
+   * When set, the answer is already decided and the model is not called:
+   * greetings, an empty or unreachable knowledge base, or no relevant evidence.
+   */
+  preAnswer: string | null;
+  diagnostics: TurnDiagnostics;
 };
+
+const TEXT_PREVIEW = 700;
+
+function emptyPayloadBase(analysis: QueryAnalysis, profile: UserProfile): PreparedTurn['payloadBase'] {
+  return {
+    intent: analysis.intent,
+    confidence: analysis.confidence,
+    recommendations: [],
+    citations: [],
+    sources: [],
+    followUpSuggestions: [],
+    conflicts: [],
+    profile,
+    clarifyingQuestion: null,
+  };
+}
 
 export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
   const started = Date.now();
   const history = input.history.map((t) => ({ role: t.role, content: t.content }));
 
+  const baseDiagnostics = (analysis: QueryAnalysis, mode: 'factual' | 'guidance', terms: string[]): TurnDiagnostics => ({
+    query: input.message,
+    rewrittenQuery: analysis.rewrittenQuery,
+    intent: analysis.intent,
+    mode,
+    filters: {},
+    queryTerms: terms,
+    thresholds: {
+      minLexicalCoverage: THRESHOLDS.minLexicalCoverage,
+      minLlmRelevance: THRESHOLDS.minLlmRelevance,
+      semanticOverride: THRESHOLDS.semanticOverride,
+    },
+    candidates: [],
+    citationMap: [],
+    unsupportedSentences: [],
+    noAnswerReason: null,
+    rerankStrategy: null,
+  });
+
+  // A greeting needs no analysis, no retrieval and no model.
+  if (isSmallTalk(input.message)) {
+    const analysis: QueryAnalysis = {
+      intent: 'general_info', confidence: 1, rewrittenQuery: input.message, keywords: [], profileUpdates: {},
+      missingInfo: null, isMultiPart: false, subQuestions: [],
+    };
+    const diagnostics = baseDiagnostics(analysis, 'factual', []);
+    diagnostics.noAnswerReason = 'small_talk';
+    return {
+      analysis, profile: input.profile, messages: [], payloadBase: emptyPayloadBase(analysis, input.profile),
+      usedSources: [], timings: { analyzeMs: 0, retrieveMs: 0, rerankMs: 0 }, mode: 'factual',
+      preAnswer: SMALL_TALK_TEXT, diagnostics,
+    };
+  }
+
   const analysis = await analyzeQuery(input.message, history, input.profile);
   const profile = mergeProfile(input.profile, analysis.profileUpdates);
   const analyzeMs = Date.now() - started;
 
-  // Off-topic short-circuits before any retrieval spend.
-  if (analysis.intent === 'off_topic') {
+  // Intent routes the conversation (lookup vs personal guidance). It never
+  // decides whether to search: every question is searched, including ones the
+  // classifier calls off-topic, because the knowledge base can hold any subject.
+  const mode: 'factual' | 'guidance' = isGuidanceRequest(input.message) ? 'guidance' : 'factual';
+  const query = analysis.rewrittenQuery || input.message;
+  const terms = contentTerms(query);
+  const diagnostics = baseDiagnostics(analysis, mode, terms.map((t) => t.raw));
+
+  const finish = (reason: string, answer: string, partial: Partial<PreparedTurn> = {}): PreparedTurn => {
+    diagnostics.noAnswerReason = reason;
+    logger.info('RAG turn without an answer from evidence', {
+      reason, mode, query: input.message.slice(0, 160),
+      candidates: diagnostics.candidates.length,
+    });
     return {
-      analysis,
-      profile,
+      analysis, profile, messages: [], payloadBase: emptyPayloadBase(analysis, profile), usedSources: [],
+      timings: { analyzeMs, retrieveMs: 0, rerankMs: 0 }, mode, preAnswer: answer, diagnostics, ...partial,
+    };
+  };
+
+  const genericLookup = mode === 'factual' && (analysis.intent === 'off_topic' || analysis.intent === 'general_info');
+  const retrievalAnalysis: QueryAnalysis = {
+    ...analysis,
+    // Generic or unrecognised lookups search with the user's own words only: no intent
+    // vocabulary, no category bias. A confidently recognised domain intent (contact,
+    // eligibility, financial aid…) keeps its vocabulary expansion, which helps recall.
+    intent: genericLookup ? 'off_topic' : analysis.intent,
+    keywords: [...new Set([...analysis.keywords, ...terms.map((t) => t.raw)])].slice(0, 10),
+  };
+
+  // 1. Candidates from Qdrant (all permitted sources unless a source filter was explicitly given).
+  const retrieveStart = Date.now();
+  let retrieval;
+  try {
+    retrieval = await retrieve(retrievalAnalysis, profile, {
+      sourceIds: input.sourceIds,
+      expand: !genericLookup,
+    });
+  } catch (err) {
+    logger.error('Knowledge base search failed', { error: err instanceof Error ? err.message : String(err) });
+    return finish('knowledge_base_unavailable', KB_UNAVAILABLE_TEXT);
+  }
+  diagnostics.filters = {
+    ...retrieval.filters,
+    sourceIds: input.sourceIds ?? 'all permitted sources',
+    audience: 'ranking preference only (not a filter)',
+  };
+  if (retrieval.vectorQueries > 0 && retrieval.vectorFailures >= retrieval.vectorQueries) {
+    return finish('knowledge_base_unavailable', KB_UNAVAILABLE_TEXT);
+  }
+  const candidates = retrieval.sources;
+  if (candidates.length === 0) {
+    const stats = await collectionStats();
+    return finish(stats.exists && stats.vectorCount > 0 ? 'no_candidates' : 'empty_knowledge_base', NO_ANSWER_TEXT);
+  }
+
+  // 2. PostgreSQL validation: reject stale, deleted and non-public chunks.
+  const { valid, rejected } = await validateChunks(candidates);
+  const status = new Map<string, { status: CandidateStatus; reason: string | null }>();
+  for (const r of rejected) status.set(r.chunkId, { status: r.status, reason: r.reason });
+
+  // 3. Relevance gate (deterministic), then the model's relevance judgement via reranking.
+  const gate = relevanceGate(terms, valid);
+  for (const [chunkId, reason] of gate.below) status.set(chunkId, { status: 'below_relevance', reason });
+
+  let relevant = gate.relevant;
+  const termProfile = await profileTerms(terms);
+  const unknown = outsideKnowledgeBase(termProfile) ? termProfile.unknown : [];
+  if (unknown.length && relevant.length) {
+    // Most of what the question asks about appears nowhere in the knowledge base.
+    for (const s of relevant) status.set(s.chunkId, { status: 'below_relevance', reason: `"${unknown.join('", "')}" does not appear anywhere in the knowledge base` });
+    relevant = [];
+  }
+
+  let ranked: RetrievedSource[] = [];
+  let strategy = 'none';
+  let rerankMs = 0;
+  if (relevant.length) {
+    const result = await rerank(retrievalAnalysis, relevant, env.RETRIEVAL_FINAL_K, { forceLlm: true });
+    strategy = result.strategy;
+    rerankMs = result.rerankMs;
+    ranked = result.sources;
+    if (strategy === 'llm') {
+      // The relevance model is a noisy judge (scores vary run to run and are
+      // sometimes missing), so it only vetoes: a passage it explicitly scored
+      // below the bar is dropped, an unscored one is not penalised, and if it
+      // judged the evidence irrelevant across the board the answer is "not found".
+      const judged = ranked.filter((s) => s.llmRelevance !== undefined);
+      const low = (s: RetrievedSource) => (s.llmRelevance ?? 10) < THRESHOLDS.minLlmRelevance;
+      if (judged.length > 0 && judged.length >= ranked.length / 2 && judged.every(low)) {
+        for (const s of ranked) status.set(s.chunkId, { status: 'below_relevance', reason: `relevance model scored every passage below ${THRESHOLDS.minLlmRelevance}/10` });
+        ranked = [];
+      } else {
+        ranked = ranked.filter((s) => {
+          if (!low(s)) return true;
+          status.set(s.chunkId, { status: 'below_relevance', reason: `relevance ${s.llmRelevance}/10 is below ${THRESHOLDS.minLlmRelevance}` });
+          return false;
+        });
+      }
+    }
+  }
+  diagnostics.rerankStrategy = strategy;
+
+  const consolidated = prioritizeByFreshness(deduplicateSources(ranked));
+  const usedSources = consolidated.slice(0, env.RETRIEVAL_FINAL_K).map((source) => ({ ...source, used: true }));
+  for (const s of usedSources) status.set(s.chunkId, { status: 'used', reason: null });
+
+  // Diagnostics: every candidate with its fate, similarity, coverage and text.
+  const byId = new Map<string, RetrievedSource>();
+  for (const s of valid) byId.set(s.chunkId, s);
+  diagnostics.candidates = [...candidates]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 40)
+    .map((c) => {
+      const v = byId.get(c.chunkId) ?? c;
+      const st = status.get(c.chunkId) ?? { status: 'not_selected' as CandidateStatus, reason: 'ranked below the passages used' };
+      return {
+        chunkId: c.chunkId,
+        documentId: c.documentId,
+        sourceId: v.sourceId ?? null,
+        title: v.title,
+        url: v.url,
+        headingPath: v.headingPath,
+        similarity: c.similarity ?? null,
+        fusedScore: Number(c.score.toFixed(4)),
+        lexicalCoverage: Number((gate.coverage.get(c.chunkId) ?? 0).toFixed(2)),
+        llmRelevance: ranked.find((r) => r.chunkId === c.chunkId)?.llmRelevance ?? null,
+        status: st.status,
+        reason: st.reason,
+        text: v.snippet.slice(0, TEXT_PREVIEW),
+      };
+    });
+
+  logger.info('RAG retrieval', {
+    query: input.message.slice(0, 160),
+    rewritten: query.slice(0, 160),
+    intent: analysis.intent,
+    mode,
+    sourceFilter: input.sourceIds ?? null,
+    candidates: candidates.length,
+    validated: valid.length,
+    rejectedByPostgres: rejected.map((r) => ({ chunkId: r.chunkId, status: r.status })),
+    relevant: relevant.length,
+    used: usedSources.map((s) => ({ chunkId: s.chunkId, documentId: s.documentId, similarity: s.similarity, llmRelevance: s.llmRelevance ?? null })),
+    rerank: strategy,
+  });
+
+  const retrieveMs = Date.now() - retrieveStart - rerankMs;
+  if (usedSources.length === 0) {
+    const reason = rejected.length === candidates.length
+      ? 'all_candidates_failed_postgres_validation'
+      : unknown.length
+        ? `unknown_term:${unknown.join(',')}`
+        : 'no_relevant_chunk';
+    return finish(reason, NO_ANSWER_TEXT, { timings: { analyzeMs, retrieveMs, rerankMs } });
+  }
+
+  const conflicts = detectConflicts(usedSources);
+  const contextBlock = buildContextBlock(usedSources);
+
+  // ── Factual lookup: sources and question only. No persona, no program promotion. ──
+  if (mode === 'factual') {
+    return {
+      analysis, profile, mode, preAnswer: null, diagnostics, usedSources,
+      timings: { analyzeMs, retrieveMs, rerankMs },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: STRICT_FACTUAL_PROMPT },
         ...recentHistory(input.history),
-        { role: 'user', content: `${input.message}\n\n${OFF_TOPIC_INSTRUCTION}` },
+        { role: 'user', content: `${contextBlock}\n\n---\n\nQUESTION:\n${input.message}${analysis.rewrittenQuery && analysis.rewrittenQuery !== input.message ? `\n(Understood in context as: ${analysis.rewrittenQuery})` : ''}` },
       ],
       payloadBase: {
-        intent: analysis.intent,
-        confidence: analysis.confidence,
-        recommendations: [],
+        ...emptyPayloadBase(analysis, profile),
         citations: [],
-        sources: [],
-        followUpSuggestions: FALLBACK_FOLLOW_UPS.off_topic,
-        conflicts: [],
-        profile,
-        clarifyingQuestion: null,
+        sources: usedSources,
+        conflicts,
       },
-      usedSources: [],
-      timings: { analyzeMs, retrieveMs: 0, rerankMs: 0 },
     };
   }
 
-  const retrieveStart = Date.now();
-  const retrieval = await retrieve(analysis, profile, { sourceIds: input.sourceIds });
-  const liveSources = await verifySourcesAreLive(retrieval.sources);
-  const retrieveMs = Date.now() - retrieveStart;
-
-  const { sources: ranked, rerankMs, strategy } = await rerank(analysis, liveSources);
-  const consolidated = prioritizeByFreshness(deduplicateSources(ranked));
-  const usedSources = consolidated
-    .slice(0, env.RETRIEVAL_FINAL_K)
-    .map((source) => ({ ...source, used: true }));
-
-  const conflicts = detectConflicts(usedSources);
-
-  // Structured program records — authoritative, read straight from Postgres.
+  // ── Personalised guidance: same evidence rules, plus verified program records. ──
   let recommendations: AssistantPayload['recommendations'] = [];
   try {
     const programs = await retrieveStructuredPrograms(analysis, profile);
@@ -129,67 +342,40 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
     });
   }
 
-  logger.debug('Turn prepared', {
-    intent: analysis.intent,
-    retrieved: retrieval.sources.length,
-    used: usedSources.length,
-    recommendations: recommendations.length,
-    rerank: strategy,
-  });
-
-  const contextBlock =
-    usedSources.length > 0 ? buildContextBlock(usedSources) : NO_EVIDENCE_INSTRUCTION;
-  const programBlock = buildProgramBlock(recommendations);
-  const profileBlock = buildProfileBlock(profile, analysis.intent);
-
   const instructions: string[] = [];
   if (analysis.isMultiPart) {
-    instructions.push(
-      `This message asks more than one thing (${analysis.subQuestions.length} parts). Address each one — briefly — in a single flowing answer, not as separate mini-answers.`,
-    );
+    instructions.push(`This message asks more than one thing (${analysis.subQuestions.length} parts). Address each one — briefly — in a single flowing answer, not as separate mini-answers.`);
   }
   if (analysis.missingInfo) {
-    instructions.push(
-      `Answer as fully as the sources allow, then close by asking this one question: ${analysis.missingInfo}`,
-    );
+    instructions.push(`Answer as fully as the sources allow, then close by asking this one question: ${analysis.missingInfo}`);
   }
   if (conflicts.length) {
-    instructions.push(
-      `The sources disagree about: ${conflicts.map((c) => c.topic).join(', ')}. Say that the published information differs and suggest confirming with staff. Do not pick one silently.`,
-    );
+    instructions.push(`The sources disagree about: ${conflicts.map((c) => c.topic).join(', ')}. Say that the published information differs and suggest confirming with staff. Do not pick one silently.`);
   }
 
   const userContent = [
-    profileBlock,
-    programBlock,
+    buildProfileBlock(profile, analysis.intent),
+    buildProgramBlock(recommendations),
     contextBlock,
     instructions.length ? `ADDITIONAL INSTRUCTIONS:\n${instructions.join('\n')}` : '',
     `THE PERSON ASKED:\n${input.message}`,
-  ]
-    .filter(Boolean)
-    .join('\n\n---\n\n');
+  ].filter(Boolean).join('\n\n---\n\n');
 
   return {
-    analysis,
-    profile,
+    analysis, profile, mode, preAnswer: null, diagnostics, usedSources,
+    timings: { analyzeMs, retrieveMs, rerankMs },
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + STRICT_GUIDANCE_ADDENDUM },
       ...recentHistory(input.history),
       { role: 'user', content: userContent },
     ],
     payloadBase: {
-      intent: analysis.intent,
-      confidence: analysis.confidence,
+      ...emptyPayloadBase(analysis, profile),
       recommendations,
-      citations: buildCitations(usedSources),
       sources: usedSources,
-      followUpSuggestions: [],
       conflicts,
-      profile,
       clarifyingQuestion: analysis.missingInfo,
     },
-    usedSources,
-    timings: { analyzeMs, retrieveMs, rerankMs },
   };
 }
 
@@ -198,85 +384,122 @@ export async function generateAnswer(input: GenerateInput): Promise<GenerateResu
   const started = Date.now();
   const prepared = await prepareTurn(input);
 
-  if (!hasLlm()) {
-    return buildUnavailableResult(prepared, started);
-  }
-
-  let raw: string;
+  let raw = '';
   let usage: GenerateResult['usage'] = {};
 
-  try {
-    const client = getLlmClient();
-    const response = await withTimeout(
-      client.chat.completions.create({
-        model: env.LLM_MODEL,
-        temperature: env.LLM_TEMPERATURE,
-        max_tokens: env.LLM_MAX_TOKENS,
-        messages: prepared.messages,
-      }),
-      45_000,
-      'answer generation',
-    );
-    raw = response.choices[0]?.message?.content?.trim() ?? '';
-    usage = {
-      promptTokens: response.usage?.prompt_tokens,
-      completionTokens: response.usage?.completion_tokens,
-    };
-  } catch (err) {
-    logger.error('Answer generation failed', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return buildUnavailableResult(prepared, started);
+  if (prepared.preAnswer === null) {
+    if (!hasLlm()) return buildUnavailableResult(prepared, started);
+    try {
+      const client = getLlmClient();
+      const response = await withTimeout(
+        client.chat.completions.create({
+          model: env.LLM_MODEL,
+          temperature: env.LLM_TEMPERATURE,
+          max_tokens: env.LLM_MAX_TOKENS,
+          messages: prepared.messages,
+        }),
+        45_000,
+        'answer generation',
+      );
+      raw = response.choices[0]?.message?.content?.trim() ?? '';
+      usage = {
+        promptTokens: response.usage?.prompt_tokens,
+        completionTokens: response.usage?.completion_tokens,
+      };
+    } catch (err) {
+      logger.error('Answer generation failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return buildUnavailableResult(prepared, started);
+    }
+    if (!raw) return buildUnavailableResult(prepared, started);
   }
 
-  if (!raw) return buildUnavailableResult(prepared, started);
-
-  const finalized = finalizeAnswer(raw, prepared);
-  const followUps = await generateFollowUps(input.message, finalized.answer, prepared.analysis);
-
-  return {
-    answer: finalized.answer,
-    grounding: finalized.grounding,
-    analysis: prepared.analysis,
-    usage,
-    payload: {
-      ...prepared.payloadBase,
-      citations: finalized.citations,
-      followUpSuggestions: followUps,
-      grounded: finalized.grounding.grounded && prepared.usedSources.length > 0,
-      latencyMs: Date.now() - started,
-    },
-  };
+  const done = await completeTurn(prepared, raw, input.message, started);
+  return { answer: done.answer, grounding: done.grounding, analysis: prepared.analysis, usage, payload: done.payload, diagnostics: prepared.diagnostics };
 }
 
 /**
- * Applies the post-generation passes in a fixed order: soften overclaims,
- * reconcile citation numbering, then check grounding on the final text that
- * the user will actually see.
+ * Turns the model's raw text into the final, verified response.
+ *
+ * The model's text is never shown as written. It is checked against the chunks
+ * it was given: unsupported sentences are removed, citations are rebuilt from
+ * the chunks that actually support each claim, and "no answer" becomes the
+ * fixed sentence. The payload then carries only evidence that survived.
+ */
+export async function completeTurn(
+  prepared: PreparedTurn,
+  raw: string,
+  message: string,
+  started: number,
+): Promise<{ answer: string; payload: AssistantPayload; grounding: GroundingReport }> {
+  const finalized = finalizeAnswer(raw, prepared);
+  const answered = !finalized.noAnswer;
+
+  // Follow-up suggestions only make sense for guidance; a lookup stays a lookup.
+  const followUps =
+    answered && prepared.mode === 'guidance' ? await generateFollowUps(message, finalized.answer, prepared.analysis) : [];
+
+  const payload: AssistantPayload = {
+    ...prepared.payloadBase,
+    recommendations: answered ? prepared.payloadBase.recommendations : [],
+    sources: answered ? prepared.usedSources : [],
+    citations: finalized.citations,
+    followUpSuggestions: followUps,
+    clarifyingQuestion: answered ? prepared.payloadBase.clarifyingQuestion : null,
+    grounded: answered && finalized.grounding.grounded && prepared.usedSources.length > 0,
+    latencyMs: Date.now() - started,
+  };
+  return { answer: finalized.answer, payload, grounding: finalized.grounding };
+}
+
+/**
+ * Verification, in a fixed order: soften eligibility overclaims, verify every
+ * claim and rebuild citations from the supporting chunks, then run the
+ * phone/e-mail/link checks on the exact text the user will see.
  */
 export function finalizeAnswer(raw: string, prepared: PreparedTurn) {
-  const softened = softenOverclaims(raw);
-  const { answer, citations } = reconcileCitations(softened, prepared.usedSources);
-  const grounding = checkGrounding(
-    answer,
-    prepared.usedSources,
-    prepared.payloadBase.recommendations,
-  );
-
-  if (!grounding.grounded) {
-    logger.warn('Answer failed grounding checks', {
-      issues: grounding.issues.slice(0, 5),
-      intent: prepared.analysis.intent,
-    });
+  // Decided without the model (greeting, empty/unavailable KB, no relevant evidence).
+  if (prepared.preAnswer !== null) {
+    return {
+      answer: prepared.preAnswer,
+      citations: [] as AssistantPayload['citations'],
+      grounding: { grounded: true, issues: [], unsupportedClaims: [] } as GroundingReport,
+      noAnswer: true,
+    };
   }
 
-  return { answer, citations, grounding };
+  const softened = softenOverclaims(raw);
+  const verified = verifyAnswer(softened, prepared.usedSources);
+  prepared.diagnostics.unsupportedSentences = verified.unsupported;
+
+  if (verified.noAnswer) {
+    prepared.diagnostics.noAnswerReason = verified.reason;
+    logger.info('Model answer rejected', { reason: verified.reason, unsupported: verified.unsupported.length, mode: prepared.mode });
+    return {
+      answer: NO_ANSWER_TEXT,
+      citations: [] as AssistantPayload['citations'],
+      grounding: { grounded: true, issues: [], unsupportedClaims: verified.unsupported } as GroundingReport,
+      noAnswer: true,
+    };
+  }
+
+  prepared.diagnostics.citationMap = verified.citationMap;
+  const grounding = checkGrounding(verified.answer, prepared.usedSources, prepared.payloadBase.recommendations);
+  if (!grounding.grounded) {
+    logger.warn('Answer failed grounding checks', { issues: grounding.issues.slice(0, 5), intent: prepared.analysis.intent });
+  }
+  return { answer: verified.answer, citations: verified.citations, grounding, noAnswer: false };
 }
 
 /** Streaming token source for the chat route. */
 export async function* streamAnswer(
   prepared: PreparedTurn,
 ): AsyncGenerator<string, { raw: string }, void> {
+  if (prepared.preAnswer !== null) {
+    yield prepared.preAnswer;
+    return { raw: prepared.preAnswer };
+  }
   if (!hasLlm()) {
     const text = unavailableMessage();
     yield text;

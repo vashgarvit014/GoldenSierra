@@ -20,6 +20,9 @@ export type RetrievalResult = {
   sources: RetrievedSource[];
   timings: { vectorMs: number; keywordMs: number; totalMs: number };
   filters: SearchFilters;
+  /** How many of the vector sub-queries errored — all of them means the store was unreachable. */
+  vectorQueries: number;
+  vectorFailures: number;
 };
 
 /** Which document categories matter most for each intent. */
@@ -42,19 +45,16 @@ export function buildFilters(analysis: QueryAnalysis, profile: UserProfile, sour
   const filters: SearchFilters = { accessLevels: ['PUBLIC'], language: 'en' };
   if (sourceIds?.length) filters.sourceIds = sourceIds;
 
-  const audience = profile.audience;
-  if (audience === 'employer') filters.audiences = ['employer', 'both'];
-  else if (audience === 'job_seeker') filters.audiences = ['job_seeker', 'both'];
-
-  if (profile.county) filters.counties = [profile.county];
-
+  // Audience is a ranking preference, never a filter: the classifier is a
+  // heuristic, and a wrong label must not hide a relevant public document
+  // (see the soft boost in `retrieve`). County is a boost for the same reason.
   return filters;
 }
 
 export async function retrieve(
   analysis: QueryAnalysis,
   profile: UserProfile,
-  options: { topK?: number; finalK?: number; sourceIds?: string[] } = {},
+  options: { topK?: number; finalK?: number; sourceIds?: string[]; /** false = search with the user's own words only */ expand?: boolean } = {},
 ): Promise<RetrievalResult> {
   const started = Date.now();
   const topK = options.topK ?? env.RETRIEVAL_TOP_K;
@@ -62,15 +62,17 @@ export async function retrieve(
 
   // Multi-part questions get one retrieval per sub-question so a two-part ask
   // ("training AND how do I apply?") does not lose half its evidence.
-  const queries = buildQueries(analysis, profile);
+  const queries = buildQueries(analysis, profile, options.expand !== false);
 
   const vectorStart = Date.now();
+  let vectorFailures = 0;
   const vectorResults = await Promise.all(
     queries.map(async (query) => {
       try {
         const vector = await embedQuery(query);
         return await searchVectors(vector, topK, filters, env.RETRIEVAL_MIN_SCORE);
       } catch (err) {
+        vectorFailures++;
         logger.warn('Vector search failed for a sub-query', {
           query: query.slice(0, 80),
           error: err instanceof Error ? err.message : String(err),
@@ -94,6 +96,16 @@ export async function retrieve(
 
   const fused = reciprocalRankFusion([...vectorResults, keywordResults]);
 
+  // Rank-fusion scores are relative; the raw cosine similarity is the only
+  // absolute relevance signal, so keep the best one per chunk for gating/diagnostics.
+  const cosine = new Map<string, number>();
+  for (const list of vectorResults) {
+    for (const hit of list) {
+      const key = hit.payload?.chunkId ?? hit.id;
+      if (key && hit.score > (cosine.get(key) ?? 0)) cosine.set(key, hit.score);
+    }
+  }
+
   // Boost passages whose category matches the intent and whose county matches
   // the user, then re-sort. Applied after fusion so it adjusts ranking rather
   // than excluding anything outright.
@@ -108,6 +120,13 @@ export async function retrieve(
     else if (payload.category && preferred.has(payload.category)) boost += 0.2;
 
     if (profile.county && payload.counties?.includes(profile.county)) boost += 0.15;
+
+    // Audience: a mild preference. 'agency' is also what unclassifiable pages fall
+    // back to, so it is treated as neutral rather than as a mismatch.
+    if (profile.audience && payload.audience) {
+      if (payload.audience === profile.audience || payload.audience === 'both') boost += 0.1;
+      else if (payload.audience !== 'agency') boost -= 0.1;
+    }
 
     // Prefer pages verified recently; stale material should lose ties.
     const verified = payload.lastVerifiedAt;
@@ -129,6 +148,8 @@ export async function retrieve(
   const sources: RetrievedSource[] = scored.map((entry) => ({
     chunkId: entry.hit.payload.chunkId,
     documentId: entry.hit.payload.documentId,
+    pointId: String(entry.hit.id),
+    similarity: cosine.get(entry.hit.payload.chunkId) ?? null,
     sourceId: entry.hit.payload.sourceId ?? null,
     title: entry.hit.payload.title,
     url: entry.hit.payload.url,
@@ -145,6 +166,8 @@ export async function retrieve(
     sources,
     timings: { vectorMs, keywordMs, totalMs: Date.now() - started },
     filters,
+    vectorQueries: queries.length,
+    vectorFailures,
   };
 }
 
@@ -172,12 +195,13 @@ const INTENT_EXPANSIONS: Record<Intent, string> = {
   off_topic: '',
 };
 
-function buildQueries(analysis: QueryAnalysis, profile: UserProfile): string[] {
+function buildQueries(analysis: QueryAnalysis, profile: UserProfile, expand = true): string[] {
   const queries = new Set<string>();
   queries.add(analysis.rewrittenQuery);
 
-  // Expansion query in the corpus's vocabulary, not the user's.
-  const expansion = INTENT_EXPANSIONS[analysis.intent];
+  // Expansion query in the corpus's vocabulary, not the user's. Skipped for
+  // direct lookups, where it would pull in unrelated, generic pages.
+  const expansion = expand ? INTENT_EXPANSIONS[analysis.intent] : '';
   if (expansion) {
     queries.add([expansion, ...analysis.keywords].join(' '));
   }
@@ -196,7 +220,7 @@ function buildQueries(analysis: QueryAnalysis, profile: UserProfile): string[] {
     profile.audience === 'employer' ? 'employer business services' : null,
   ].filter(Boolean);
 
-  if (context.length) queries.add(`${analysis.rewrittenQuery} ${context.join(' ')}`);
+  if (expand && context.length) queries.add(`${analysis.rewrittenQuery} ${context.join(' ')}`);
 
   return [...queries].slice(0, 4);
 }

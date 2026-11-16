@@ -24,3 +24,4 @@ logs/
 test-artifacts/theme/
 test-artifacts/routes/
 test-artifacts/universal/
+test-artifacts/strict-rag/

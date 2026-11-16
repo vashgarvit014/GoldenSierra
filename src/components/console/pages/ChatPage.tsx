@@ -219,9 +219,9 @@ export function ChatPage() {
                   </div>
                   <h2>How can I help you today?</h2>
                   <p>
-                    Ask about job search support, training, scholarships, paid internships, or
-                    hiring help for employers. Answers are drawn from Golden Sierra&apos;s indexed
-                    content with sources attached.
+                    Ask a question. Answers come only from the documents indexed in the knowledge
+                    base, with their sources attached — if the knowledge base does not cover it,
+                    I will say so.
                   </p>
                 </div>
                 <div className="prompts" id="prompts">
@@ -423,10 +423,10 @@ function AssistantMessage({ turn }: { turn: ChatTurn }) {
             />
           </div>
 
-          {payload && !payload.grounded && (
+          {payload && !payload.grounded && payload.sources.length > 0 && (
             <div className="callout" style={{ marginTop: 12 }}>
-              This answer is not backed by indexed sources. Please confirm anything important by
-              calling (916) 746-7722.
+              Some details in this answer could not be fully verified against its sources. Please
+              confirm anything important before relying on it.
             </div>
           )}
 

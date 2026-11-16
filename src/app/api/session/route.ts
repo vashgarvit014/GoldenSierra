@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { badRequest, withErrorHandling } from '@/lib/errors';
 import { clientIpFrom, enforceRateLimit, hashIdentifier } from '@/lib/rate-limit';
 import { createSession, loadSession } from '@/lib/session';
+import { isFactualLookup, lookupTurn } from '@/lib/counselor/lookup';
 import { runTurn } from '@/lib/counselor/engine';
 import type { CounselorContext, SessionMode } from '@/types/counselor';
 
@@ -85,13 +86,17 @@ export const POST = withErrorHandling(async (request: Request) => {
   });
 
   const started = Date.now();
-  const { turn, askedQuestions } = await runTurn({
+  const turnInput = {
     message,
     context,
     history: history.map((h) => ({ role: h.role, content: h.content })),
     askedQuestions: stored.askedQuestions ?? [],
     forceResults: body.forceResults,
-  });
+  };
+  // A direct factual question is answered from the indexed documents; personal
+  // workforce questions continue through the adaptive counselor flow.
+  const { turn, askedQuestions } =
+    !body.forceResults && isFactualLookup(message) ? await lookupTurn(turnInput) : await runTurn(turnInput);
 
   const saved = await prisma.chatMessage.create({
     data: {

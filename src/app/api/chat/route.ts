@@ -11,7 +11,7 @@ import {
   loadSession,
   updateProfile,
 } from '@/lib/session';
-import { finalizeAnswer, generateFollowUps, prepareTurn, streamAnswer } from '@/lib/rag/generate';
+import { completeTurn, prepareTurn, streamAnswer } from '@/lib/rag/generate';
 import type { AssistantPayload } from '@/types/chat';
 
 export const runtime = 'nodejs';
@@ -65,9 +65,10 @@ export const POST = withErrorHandling(async (request: Request) => {
     type: 'meta' as const,
     intent: prepared.payloadBase.intent,
     confidence: prepared.payloadBase.confidence,
-    recommendations: prepared.payloadBase.recommendations,
-    sources: prepared.payloadBase.sources,
-    citations: prepared.payloadBase.citations,
+    // Evidence is only shown once the answer has been verified against it.
+    recommendations: [] as typeof prepared.payloadBase.recommendations,
+    sources: [] as typeof prepared.payloadBase.sources,
+    citations: [] as typeof prepared.payloadBase.citations,
     conflicts: prepared.payloadBase.conflicts,
     profile: prepared.profile,
   };
@@ -77,23 +78,14 @@ export const POST = withErrorHandling(async (request: Request) => {
     let raw = '';
     for await (const token of streamAnswer(prepared)) raw += token;
 
-    const finalized = finalizeAnswer(raw, prepared);
-    const followUps = await generateFollowUps(message, finalized.answer, prepared.analysis);
+    const { answer, payload } = await completeTurn(prepared, raw, message, started);
 
-    const payload: AssistantPayload = {
-      ...prepared.payloadBase,
-      citations: finalized.citations,
-      followUpSuggestions: followUps,
-      grounded: finalized.grounding.grounded && prepared.usedSources.length > 0,
-      latencyMs: Date.now() - started,
-    };
-
-    const saved = await appendAssistantMessage(session.id, finalized.answer, payload, {
+    const saved = await appendAssistantMessage(session.id, answer, payload, {
       latencyMs: payload.latencyMs,
     });
     await logRetrieval(session.id, saved.id, message, prepared, payload, started);
 
-    return NextResponse.json({ messageId: saved.id, answer: finalized.answer, payload });
+    return NextResponse.json({ messageId: saved.id, answer, payload });
   }
 
   // ── Streaming path ──
@@ -107,31 +99,19 @@ export const POST = withErrorHandling(async (request: Request) => {
       try {
         send(meta);
 
+        // Buffered, not streamed: the text is verified against the retrieved
+        // chunks first, so nothing unsupported is ever shown, even briefly.
         let raw = '';
-        for await (const token of streamAnswer(prepared)) {
-          raw += token;
-          send({ type: 'token', value: token });
-        }
+        for await (const token of streamAnswer(prepared)) raw += token;
 
-        const finalized = finalizeAnswer(raw, prepared);
-        const followUps = await generateFollowUps(message, finalized.answer, prepared.analysis);
+        const { answer, payload } = await completeTurn(prepared, raw, message, started);
 
-        const payload: AssistantPayload = {
-          ...prepared.payloadBase,
-          citations: finalized.citations,
-          followUpSuggestions: followUps,
-          grounded: finalized.grounding.grounded && prepared.usedSources.length > 0,
-          latencyMs: Date.now() - started,
-        };
-
-        const saved = await appendAssistantMessage(session.id, finalized.answer, payload, {
+        const saved = await appendAssistantMessage(session.id, answer, payload, {
           latencyMs: payload.latencyMs,
         });
 
-        // The streamed tokens are the raw model output; the finalized answer
-        // may differ after citation renumbering and overclaim softening, so
-        // the client replaces its buffer with `answer` on completion.
-        send({ type: 'done', messageId: saved.id, answer: finalized.answer, payload });
+        send({ type: 'token', value: answer });
+        send({ type: 'done', messageId: saved.id, answer, payload });
 
         await logRetrieval(session.id, saved.id, message, prepared, payload, started);
       } catch (err) {
@@ -176,15 +156,20 @@ async function logRetrieval(
         query,
         rewrittenQuery: prepared.analysis.rewrittenQuery,
         intent: prepared.analysis.intent,
-        filters: {} as never,
-        results: prepared.usedSources.map((source) => ({
-          chunkId: source.chunkId,
-          documentId: source.documentId,
-          title: source.title,
-          url: source.url,
-          score: source.score,
-          rerankScore: source.rerankScore ?? null,
-          used: source.used,
+        filters: prepared.diagnostics.filters as never,
+        // Every candidate with its fate and scores, so a response can be audited
+        // against PostgreSQL and Qdrant after the fact.
+        results: prepared.diagnostics.candidates.map((c) => ({
+          chunkId: c.chunkId,
+          documentId: c.documentId,
+          title: c.title,
+          url: c.url,
+          similarity: c.similarity,
+          fusedScore: c.fusedScore,
+          lexicalCoverage: c.lexicalCoverage,
+          llmRelevance: c.llmRelevance,
+          status: c.status,
+          used: c.status === 'used',
         })) as never,
         vectorMs: prepared.timings.retrieveMs ?? null,
         rerankMs: prepared.timings.rerankMs ?? null,

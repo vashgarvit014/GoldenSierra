@@ -89,6 +89,9 @@ export type Citation = {
   /** ISO date of the last time the crawler confirmed this page. */
   lastVerified: string | null;
   documentType: string;
+  /** Document and chunks the cited claims were verified against. */
+  documentId?: string;
+  chunkIds?: string[];
 };
 
 export type Recommendation = {
@@ -114,11 +117,17 @@ export type RetrievedSource = {
   chunkId: string;
   documentId: string;
   sourceId?: string | null;
+  /** Qdrant point id of the hit, checked against PostgreSQL's recorded vectorId. */
+  pointId?: string;
+  /** Best raw cosine similarity of this chunk across the vector queries (null for keyword-only hits). */
+  similarity?: number | null;
   title: string;
   url: string | null;
   snippet: string;
   score: number;
   rerankScore?: number;
+  /** Raw 0–10 relevance the LLM assigned to this passage for this question. */
+  llmRelevance?: number;
   headingPath: string | null;
   category: string | null;
   lastVerified: string | null;
@@ -131,6 +140,50 @@ export type ConflictNote = {
   topic: string;
   description: string;
   sources: { title: string; url: string | null; lastVerified: string | null }[];
+};
+
+/** Why one retrieved chunk did or did not reach the model. */
+export type CandidateStatus =
+  | 'used'
+  | 'not_selected'
+  | 'below_relevance'
+  | 'rejected_not_in_postgres'
+  | 'rejected_document_mismatch'
+  | 'rejected_document_state'
+  | 'rejected_not_public'
+  | 'rejected_stale_vector'
+  | 'rejected_stale_content';
+
+/** Everything an operator needs to see why an answer came out the way it did. */
+export type TurnDiagnostics = {
+  query: string;
+  rewrittenQuery: string;
+  intent: Intent;
+  /** factual = answer straight from documents; guidance = personalised workforce help. */
+  mode: 'factual' | 'guidance';
+  filters: Record<string, unknown>;
+  queryTerms: string[];
+  thresholds: { minLexicalCoverage: number; minLlmRelevance: number; semanticOverride: number };
+  candidates: {
+    chunkId: string;
+    documentId: string;
+    sourceId: string | null;
+    title: string;
+    url: string | null;
+    headingPath: string | null;
+    similarity: number | null;
+    fusedScore: number;
+    lexicalCoverage: number;
+    llmRelevance: number | null;
+    status: CandidateStatus;
+    reason: string | null;
+    text: string;
+  }[];
+  /** Citation numbers as shown to the user → the chunks that support them. */
+  citationMap: { n: number; documentId: string; chunkIds: string[]; title: string; url: string | null }[];
+  unsupportedSentences: string[];
+  noAnswerReason: string | null;
+  rerankStrategy: string | null;
 };
 
 /** Everything the UI needs to render one assistant turn. */
