@@ -23,3 +23,4 @@ logs/
 .tmp/
 test-artifacts/theme/
 test-artifacts/routes/
+test-artifacts/universal/

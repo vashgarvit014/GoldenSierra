@@ -48,6 +48,8 @@ export type GenerateInput = {
   history: ChatTurn[];
   profile: UserProfile;
   sessionId?: string;
+  /** Restrict retrieval to these knowledge sources (admin source-level testing). */
+  sourceIds?: string[];
 };
 
 export type GenerateResult = {
@@ -103,7 +105,7 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
   }
 
   const retrieveStart = Date.now();
-  const retrieval = await retrieve(analysis, profile);
+  const retrieval = await retrieve(analysis, profile, { sourceIds: input.sourceIds });
   const liveSources = await verifySourcesAreLive(retrieval.sources);
   const retrieveMs = Date.now() - retrieveStart;
 

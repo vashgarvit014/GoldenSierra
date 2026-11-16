@@ -1,9 +1,9 @@
 import { extractText, getDocumentProxy } from 'unpdf';
 import { env } from '../env';
 import { normalizeText } from './extract';
-import { withTimeout } from '../errors';
 import { logger } from '../logger';
-import { assertPublicUrl, validatePdfUrl } from './safety';
+import { safeFetch, type SafeFetchOptions } from '../net/safe-fetch';
+import { validatePdfUrl } from './safety';
 
 /**
  * PDF text extraction. `unpdf` wraps a serverless build of pdf.js, so this
@@ -73,37 +73,22 @@ export async function extractPdfFromBuffer(
   };
 }
 
-export async function fetchAndExtractPdf(url: string): Promise<ExtractedPdf> {
-  // Redirects are followed by hand so every hop is re-checked; otherwise a
-  // public URL could bounce the server to an internal address.
-  let target = validatePdfUrl(url);
-  let response: Response | undefined;
-  for (let hop = 0; hop <= 5; hop++) {
-    await assertPublicUrl(target);
-    response = await withTimeout(
-      fetch(target, { headers: { 'User-Agent': env.CRAWL_USER_AGENT }, redirect: 'manual' }),
-      env.CRAWL_TIMEOUT_MS,
-      `fetch pdf ${target}`,
-    );
-    const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location) {
-      target = validatePdfUrl(new URL(location, target).toString());
-      response = undefined;
-      continue;
-    }
-    break;
-  }
-  if (!response) throw new Error(`Too many redirects fetching ${url}`);
-  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
+export async function fetchAndExtractPdf(
+  url: string,
+  testing: Pick<SafeFetchOptions, 'resolver' | 'transport' | 'inScope'> = {},
+): Promise<ExtractedPdf> {
+  // Same network rules as every other fetch: public hosts only, pinned
+  // connections, every redirect revalidated, bounded size and time.
+  const response = await safeFetch(validatePdfUrl(url), {
+    maxBytes: env.MAX_UPLOAD_BYTES,
+    allowedContentTypes: [/^application\/pdf/, /^application\/octet-stream/, /^application\/x-pdf/],
+    ...testing,
+  });
+  if (response.status >= 400) throw new Error(`HTTP ${response.status} fetching ${url}`);
 
-  const declared = Number(response.headers.get('content-length') ?? 0);
-  if (declared > env.MAX_UPLOAD_BYTES) {
-    throw new Error(`PDF at ${url} exceeds the configured size limit`);
-  }
-
-  const buffer = await response.arrayBuffer();
-  logger.debug('Fetched PDF', { url, bytes: buffer.byteLength });
-  return extractPdfFromBuffer(buffer, { url });
+  logger.debug('Fetched PDF', { url, bytes: response.body.length });
+  const bytes = response.body;
+  return extractPdfFromBuffer(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, { url });
 }
 
 function looksLikePdf(bytes: Uint8Array): boolean {

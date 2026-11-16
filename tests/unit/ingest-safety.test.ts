@@ -59,17 +59,17 @@ describe('describeError', () => {
 });
 
 describe('validatePdfUrl', () => {
-  it('accepts http and https', () => {
+  it('accepts https URLs (and, only with the fixture switch on, http loopback)', () => {
     expect(validatePdfUrl('https://goldensierra.com/a.pdf')).toBe('https://goldensierra.com/a.pdf');
-    expect(validatePdfUrl('  http://127.0.0.1:8080/x.pdf ')).toBe('http://127.0.0.1:8080/x.pdf');
+    expect(validatePdfUrl('  http://127.0.0.1:8080/x.pdf ')).toBe('http://127.0.0.1:8080/x.pdf'); // tests/setup.ts enables fixtures
   });
 
   it.each([
-    ['upload://file.pdf', /http or https/],
-    ['ftp://host/a.pdf', /http or https/],
-    ['file:///etc/passwd', /http or https/],
-    ['javascript:alert(1)', /http or https/],
-    ['data:application/pdf;base64,AAAA', /http or https/],
+    ['upload://file.pdf', /upload endpoint/],
+    ['ftp://host/a.pdf', /http\(s\)/],
+    ['file:///etc/passwd', /http\(s\)/],
+    ['javascript:alert(1)', /http\(s\)/],
+    ['data:application/pdf;base64,AAAA', /http\(s\)/],
     ['not a url', /valid absolute URL/],
     ['/relative/a.pdf', /valid absolute URL/],
     ['https://user:pw@host/a.pdf', /credentials/],
@@ -179,53 +179,46 @@ describe('processDelivery — queue semantics', () => {
 });
 
 import { afterEach } from 'vitest';
-import { SsrfBlockedError, isPrivateAddress } from '@/lib/ingest/safety';
+import { SsrfBlockedError } from '@/lib/ingest/safety';
 import { fetchAndExtractPdf } from '@/lib/ingest/pdf';
 
-describe('SSRF protection', () => {
+describe('SSRF protection for PDF jobs (full matrix lives in net-safety.test.ts)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
   });
 
   it.each([
-    '127.0.0.1', '127.1.2.3', '10.0.0.5', '172.16.0.1', '172.31.255.255', '192.168.1.1',
-    '169.254.169.254', '100.64.0.1', '0.0.0.0', '224.0.0.1', '198.18.0.1',
-    '::1', '::', 'fe80::1', 'fd12:3456::1', 'fc00::1', '::ffff:127.0.0.1', '::ffff:10.1.1.1', '[::1]',
-  ])('treats %s as private', (ip) => expect(isPrivateAddress(ip)).toBe(true));
-
-  it.each(['8.8.8.8', '1.1.1.1', '172.15.0.1', '172.32.0.1', '100.63.0.1', '2606:4700:4700::1111', '::ffff:8.8.8.8'])(
-    'treats %s as public',
-    (ip) => expect(isPrivateAddress(ip)).toBe(false),
-  );
-
-  it.each([
-    'http://localhost/a.pdf', 'http://127.0.0.1:3000/a.pdf', 'http://10.0.0.1/a.pdf',
-    'http://169.254.169.254/latest/meta-data/', 'http://[::1]/a.pdf', 'http://db.internal/a.pdf',
-    'http://foo.localhost/a.pdf', 'http://printer.local/a.pdf',
+    'https://localhost/a.pdf', 'https://127.0.0.1:3000/a.pdf', 'https://10.0.0.1/a.pdf',
+    'https://169.254.169.254/latest/meta-data/', 'https://[::1]/a.pdf', 'https://db.internal/a.pdf',
+    'https://foo.localhost/a.pdf', 'https://printer.local/a.pdf',
   ])('rejects %s when the guard is on', (url) => {
     vi.stubEnv('ALLOW_PRIVATE_FETCH', '0');
     expect(() => validatePdfUrl(url)).toThrow(SsrfBlockedError);
     expect(() => validatePdfUrl(url)).toThrow(InvalidPdfUrlError); // permanent, never retried
   });
 
-  it('still accepts public hosts when the guard is on', () => {
+  it('requires https when the guard is on, and still accepts public hosts', () => {
     vi.stubEnv('ALLOW_PRIVATE_FETCH', '0');
     expect(validatePdfUrl('https://goldensierra.com/a.pdf')).toBe('https://goldensierra.com/a.pdf');
-    expect(validatePdfUrl('http://8.8.8.8/a.pdf')).toBe('http://8.8.8.8/a.pdf');
+    expect(() => validatePdfUrl('http://8.8.8.8/a.pdf')).toThrow(/HTTPS/);
   });
 
-  it('refuses a public URL that redirects to an internal address', async () => {
+  it('refuses a public URL that redirects to an internal address, without requesting it', async () => {
     vi.stubEnv('ALLOW_PRIVATE_FETCH', '0');
-    const fetchMock = vi.fn(async () => new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } }));
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(fetchAndExtractPdf('http://8.8.8.8/a.pdf')).rejects.toBeInstanceOf(SsrfBlockedError);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // the internal hop was never requested
+    const hosts: string[] = [];
+    const transport = async (url: URL) => {
+      hosts.push(url.hostname);
+      return { status: 302, headers: { location: 'https://169.254.169.254/latest/meta-data/' }, body: Buffer.alloc(0) };
+    };
+    const resolver = async () => [{ address: '93.184.216.34', family: 4 as const }];
+    await expect(fetchAndExtractPdf('https://example.org/a.pdf', { transport, resolver })).rejects.toThrow(/private|metadata|reserved/i);
+    expect(hosts).toEqual(['example.org']);
   });
 
   it('bounds redirect chains', async () => {
     vi.stubEnv('ALLOW_PRIVATE_FETCH', '0');
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 302, headers: { location: 'http://8.8.4.4/loop.pdf' } })));
-    await expect(fetchAndExtractPdf('http://8.8.8.8/a.pdf')).rejects.toThrow(/Too many redirects/);
+    const transport = async () => ({ status: 302, headers: { location: 'https://example.org/loop.pdf' }, body: Buffer.alloc(0) });
+    const resolver = async () => [{ address: '93.184.216.34', family: 4 as const }];
+    await expect(fetchAndExtractPdf('https://example.org/a.pdf', { transport, resolver })).rejects.toThrow(/Too many redirects/);
   });
 });

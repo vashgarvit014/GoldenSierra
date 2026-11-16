@@ -217,6 +217,8 @@ enum JobStatus {
   QUEUED
   RUNNING
   COMPLETED
+  /// Finished with usable content, but some pages failed or a budget ran out.
+  PARTIAL
   FAILED
   CANCELLED
 }

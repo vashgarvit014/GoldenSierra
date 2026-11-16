@@ -15,6 +15,8 @@ export const maxDuration = 60;
 
 const BodySchema = z.object({
   message: z.string().min(1).max(2000),
+  /** Limit retrieval to one knowledge source (used by the crawler's per-source test). */
+  sourceId: z.string().min(1).max(40).optional(),
   profile: z
     .object({
       county: z.enum(['Placer', 'El Dorado', 'Alpine']).optional(),
@@ -65,6 +67,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     message: body.message,
     history,
     profile: body.profile as UserProfile,
+    sourceIds: body.sourceId ? [body.sourceId] : undefined,
   });
 
   return NextResponse.json({
@@ -87,6 +90,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     retrievedSources: result.payload.sources.map((s) => ({
       title: s.title,
       url: s.url,
+      sourceId: s.sourceId ?? null,
       headingPath: s.headingPath,
       category: s.category,
       score: Number(s.score.toFixed(4)),

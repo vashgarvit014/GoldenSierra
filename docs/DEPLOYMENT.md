@@ -38,7 +38,9 @@ AUTH_SECRET=…                         # openssl rand -base64 48
 LLM_API_KEY=…                         # Inception Labs by default
 APP_URL=https://navigator.example.org
 NODE_ENV=production
-CRAWL_ALLOWED_HOSTS=goldensierra.com,www.goldensierra.com
+# any public https site can be added from the admin UI; optionally restrict/deny:
+CRAWL_RESTRICT_HOSTS=
+CRAWL_DENIED_HOSTS=
 
 # Embeddings run in-process by default — no second provider key needed.
 EMBEDDING_PROVIDER=local
@@ -139,7 +141,7 @@ gcloud run deploy gs-navigator \
   --cpu 1 \
   --timeout 300 \
   --set-secrets "DATABASE_URL=gs-database-url:latest,LLM_API_KEY=gs-llm-key:latest,EMBEDDING_API_KEY=gs-embedding-key:latest,AUTH_SECRET=gs-auth-secret:latest,QDRANT_API_KEY=gs-qdrant-key:latest" \
-  --set-env-vars "NODE_ENV=production,QDRANT_URL=https://your-qdrant:6333,APP_URL=https://navigator.example.org,CRAWL_ALLOWED_HOSTS=goldensierra.com"
+  --set-env-vars "NODE_ENV=production,QDRANT_URL=https://your-qdrant:6333,APP_URL=https://navigator.example.org"
 ```
 
 `--min-instances 1` avoids a cold start on the first question of the day,
@@ -357,7 +359,7 @@ needs no separate backup strategy.
 - [ ] Qdrant is not publicly reachable, and `QDRANT_API_KEY` is set
 - [ ] PostgreSQL is on a private network
 - [ ] TLS terminates at the proxy; `APP_URL` uses `https://`
-- [ ] `CRAWL_ALLOWED_HOSTS` lists only hosts you are authorized to index
+- [ ] Review `CRAWL_RESTRICT_HOSTS` / `CRAWL_DENIED_HOSTS` and the Settings denylist; administrators can register any public https site, so only grant the editor/admin roles to people permitted to choose what is indexed
 - [ ] Admin accounts use the least role that works (`VIEWER` / `EDITOR` / `ADMIN`)
 - [ ] `CHAT_RATE_LIMIT_PER_MIN` suits expected traffic; Redis is configured if
       running more than one instance, or limits apply per-instance

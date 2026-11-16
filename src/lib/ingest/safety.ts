@@ -1,5 +1,9 @@
+import { assertUrlShape, NetworkPolicyError } from '../net/policy';
+
+export { isPrivateAddress } from '../net/ip';
+
 /**
- * Small, dependency-free helpers shared by the API, the pipeline and the worker.
+ * Small helpers shared by the API, the pipeline and the worker.
  */
 
 // ───────────────────────── Error detail ─────────────────────────
@@ -74,76 +78,6 @@ export class InvalidPdfUrlError extends Error {
   }
 }
 
-// ───────────────────────── SSRF protection ─────────────────────────
-
-/** Tests and local development may fetch loopback fixtures; production must not. */
-function allowPrivate(): boolean {
-  return process.env.ALLOW_PRIVATE_FETCH === '1';
-}
-
-/** True for loopback, private, link-local, CGNAT, multicast and reserved addresses. */
-export function isPrivateAddress(ip: string): boolean {
-  const v = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]!;
-  const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateAddress(mapped[1]!);
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(v)) {
-    const [a, b, c] = v.split('.').map(Number) as [number, number, number];
-    return (
-      a === 0 || a === 10 || a === 127 || a >= 224 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 192 && b === 0 && c === 0) ||
-      (a === 198 && (b === 18 || b === 19))
-    );
-  }
-  if (v.includes(':')) {
-    return (
-      v === '::' || v === '::1' ||
-      /^f[cd]/.test(v) || // fc00::/7 unique local
-      /^fe[89ab]/.test(v) || // fe80::/10 link-local
-      v.startsWith('ff') // multicast
-    );
-  }
-  return false;
-}
-
-export class SsrfBlockedError extends InvalidPdfUrlError {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SsrfBlockedError';
-  }
-}
-
-const BLOCKED_NAMES = /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i;
-
-/** Cheap, synchronous screen: literal IPs and obviously internal host names. */
-export function assertPublicHostname(hostname: string): void {
-  if (allowPrivate()) return;
-  const host = hostname.replace(/^\[|\]$/g, '');
-  if (BLOCKED_NAMES.test(host) || isPrivateAddress(host)) {
-    throw new SsrfBlockedError('PDF url points at a private or internal address, which is not allowed');
-  }
-}
-
-/** Resolves the host and refuses it if any answer is a private address. */
-export async function assertPublicUrl(raw: string): Promise<void> {
-  if (allowPrivate()) return;
-  const { hostname } = new URL(raw);
-  assertPublicHostname(hostname);
-  const { lookup } = await import('node:dns/promises');
-  const answers = await lookup(hostname, { all: true }).catch(() => []); // unresolvable: fetch reports it
-  if (answers.some((a) => isPrivateAddress(a.address))) {
-    throw new SsrfBlockedError('PDF url resolves to a private or internal address, which is not allowed');
-  }
-}
-
-/**
- * A PDF_INGEST job fetches over the network, so its only valid input is an
- * absolute http(s) URL. `upload://` is the internal identifier of a document
- * that arrived as a file; it is not fetchable and must never become a job.
- */
 export function validatePdfUrl(raw: unknown): string {
   if (typeof raw !== 'string' || !raw.trim()) throw new InvalidPdfUrlError('A PDF url is required');
   const value = raw.trim();
@@ -155,17 +89,27 @@ export function validatePdfUrl(raw: unknown): string {
   } catch {
     throw new InvalidPdfUrlError('PDF url is not a valid absolute URL');
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new InvalidPdfUrlError(
-      `PDF url must use http or https (got "${parsed.protocol.replace(':', '')}://"); uploaded files go through the upload endpoint`,
-    );
+  if (parsed.protocol === 'upload:') {
+    throw new InvalidPdfUrlError('"upload://" is an internal identifier for uploaded files; upload the file through the upload endpoint instead');
   }
-  if (!parsed.hostname) throw new InvalidPdfUrlError('PDF url has no host');
-  if (parsed.username || parsed.password) {
-    throw new InvalidPdfUrlError('PDF url must not embed credentials');
+  try {
+    // Scheme, credentials, internal names and private IP literals — the same rules every fetch applies.
+    assertUrlShape(parsed);
+  } catch (err) {
+    if (err instanceof NetworkPolicyError) {
+      if (err.code === 'blocked_host' || err.code === 'blocked_address') throw new SsrfBlockedError(err.message);
+      throw new InvalidPdfUrlError(err.message);
+    }
+    throw err;
   }
-  assertPublicHostname(parsed.hostname);
   return parsed.toString();
+}
+
+export class SsrfBlockedError extends InvalidPdfUrlError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SsrfBlockedError';
+  }
 }
 
 // ───────────────────────── Claim decision ─────────────────────────
@@ -219,5 +163,6 @@ export class JobInFlightError extends Error {
 
 /** Errors a retry cannot fix; the worker fails these without another attempt. */
 export function isPermanentJobError(err: unknown): boolean {
-  return err instanceof InvalidPdfUrlError;
+  // Policy refusals (denylist, private address) and bad input never improve on retry.
+  return err instanceof InvalidPdfUrlError || err instanceof NetworkPolicyError;
 }

@@ -14,6 +14,8 @@ import { createHash } from 'node:crypto';
 export type VectorPayload = {
   chunkId: string;
   documentId: string;
+  /** The knowledge source the document came from (null for uploads). Enables source-level filtering. */
+  sourceId?: string | null;
   title: string;
   url: string | null;
   content: string;
@@ -99,6 +101,7 @@ export async function ensureCollection(): Promise<{ created: boolean; dimensions
 
   for (const field of [
     'documentId',
+    'sourceId',
     'chunkId',
     'category',
     'audience',
@@ -173,6 +176,8 @@ export async function upsertPoints(points: UpsertPoint[]): Promise<void> {
 }
 
 export type SearchFilters = {
+  /** Restrict to documents of these knowledge sources. */
+  sourceIds?: string[];
   categories?: string[];
   audiences?: string[];
   counties?: string[];
@@ -191,6 +196,7 @@ function buildFilter(filters: SearchFilters) {
   must.push({ key: 'accessLevel', match: { any: filters.accessLevels ?? ['PUBLIC'] } });
 
   if (filters.language) must.push({ key: 'language', match: { value: filters.language } });
+  if (filters.sourceIds?.length) must.push({ key: 'sourceId', match: { any: filters.sourceIds } });
   if (filters.categories?.length) must.push({ key: 'category', match: { any: filters.categories } });
   if (filters.audiences?.length) must.push({ key: 'audience', match: { any: filters.audiences } });
   if (filters.documentTypes?.length)
@@ -338,5 +344,27 @@ export async function qdrantHealthy(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Tags every existing vector with its document's source. Payload-only: no
+ * vector, id or chunk text is touched, and it is idempotent. Needed once for
+ * vectors written before `sourceId` existed in the payload.
+ */
+export async function setSourceIdPayload(sourceId: string, documentIds: string[]): Promise<void> {
+  if (documentIds.length === 0) return;
+  const qdrant = getQdrant();
+  const BATCH = 200;
+  for (let i = 0; i < documentIds.length; i += BATCH) {
+    await withRetry(
+      () =>
+        qdrant.setPayload(collection(), {
+          payload: { sourceId },
+          filter: { must: [{ key: 'documentId', match: { any: documentIds.slice(i, i + BATCH) } }] } as never,
+          wait: true,
+        }),
+      { attempts: 3, baseMs: 500, label: 'qdrant.setPayload' },
+    );
   }
 }

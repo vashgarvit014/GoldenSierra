@@ -187,7 +187,7 @@ describe('PDF_INGEST input validation', () => {
     'refuses to create a job for %s',
     async (url) => {
       const before = await prisma.ingestionJob.count();
-      await expect(createJob(JobType.PDF_INGEST, null, { url })).rejects.toThrow(/http|valid|required/i);
+      await expect(createJob(JobType.PDF_INGEST, null, { url })).rejects.toThrow(/http|valid|required|upload/i);
       expect(await prisma.ingestionJob.count()).toBe(before);
     },
   );
@@ -221,8 +221,7 @@ describe('job lifecycle', () => {
 
     const job = await prisma.ingestionJob.findUniqueOrThrow({ where: { id: jobId } });
     expect(job.status).toBe(JobStatus.FAILED);
-    expect(job.error).toMatch(/fetch failed/);
-    expect(job.error).toMatch(/ENOTFOUND|EAI_AGAIN|ECONNREFUSED/); // the cause, not just the wrapper
+    expect(job.error).toMatch(/ENOTFOUND|EAI_AGAIN|ECONNREFUSED/); // the cause, not just a wrapper message
     expect(job.error).not.toMatch(/password|api[_-]?key|Bearer/i);
     expect(job.finishedAt).not.toBeNull();
   });

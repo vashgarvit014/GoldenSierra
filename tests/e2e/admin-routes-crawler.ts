@@ -4,6 +4,7 @@
  *   2. Add Source → auto crawl → live stage progress → PostgreSQL + Qdrant → retrieval
  * against a controlled local test site (fictional, unique content). Run with:
  *   PORT=3100 npm run dev ; (.env must allow 127.0.0.1 in CRAWL_ALLOWED_HOSTS) ; npx tsx tests/e2e/admin-routes-crawler.ts
+ * Needs the fixture switch: start the dev server AND the worker with CRAWL_TEST_ALLOW_PRIVATE=1 (never honoured in production).
  * Everything it creates is removed through the product's own delete endpoints.
  */
 import 'dotenv/config';
@@ -111,10 +112,10 @@ const MODULES = [
     check('queue line states worker availability', /worker online|no worker|No Redis/i.test(await page.locator('#queueLine').innerText()), await page.locator('#queueLine').innerText());
 
     // server-side validation errors surface in the UI
-    await page.locator('#urlInput').fill('https://example.com/');
+    await page.locator('#urlInput').fill('javascript:alert(1)');
     await page.locator('#addSourceBtn').click();
     await page.locator('#crawlerError').waitFor();
-    check('unauthorized host: the server error is shown', /not an authorized crawl host/i.test(await page.locator('#crawlerError').innerText()), await page.locator('#crawlerError').innerText());
+    check('refused scheme: the server error is shown', /http\(s\)|HTTPS|scheme/i.test(await page.locator('#crawlerError').innerText()), await page.locator('#crawlerError').innerText());
     const sourcesAfterBad = await prisma.knowledgeSource.count();
     check('…and no source row was created', sourcesAfterBad === sourcesAtStart);
 

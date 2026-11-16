@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Head, useApi, useConsole } from '../Console';
 import { statusClass } from '@/lib/status';
 import { STAGES, type JobProgress, type StageId } from '@/lib/ingest/progress';
@@ -11,6 +11,7 @@ type Source = {
   name: string;
   type: string;
   rootUrl: string | null;
+  scopeHost: string | null;
   status: string; // source enabled/paused — not a crawl status
   documentCount: number;
   maxDepth: number;
@@ -50,6 +51,24 @@ type Job = {
   createdAt: string;
 };
 
+type SourceDetail = {
+  documentCounts: Record<string, number>;
+  chunkCount: number;
+  documents: { id: string; title: string; url: string | null; status: string; chunks: number; words: number; failureReason: string | null }[];
+  page: { page: number; pageSize: number; total: number };
+  jobs: {
+    id: string; status: string; createdAt: string; pagesProcessed: number; documentsCreated: number; documentsUpdated: number;
+    documentsSkipped: number; chunksIndexed: number; errorCount: number; error: string | null;
+    problems: { level: string; message: string; url?: string }[];
+  }[];
+};
+
+type RetrievalTest = {
+  answer: string;
+  citations: { title: string; url: string | null }[];
+  retrievedSources: { title: string; url: string | null; headingPath: string | null; score: number; snippet: string }[];
+};
+
 type QueueHealth = { enabled: boolean; waiting: number; active: number; workers: number };
 
 const STAGE_META: Record<StageId, { icon: string; label: string }> = {
@@ -75,7 +94,7 @@ export function Crawler() {
   const canEdit = role === 'EDITOR' || role === 'ADMIN';
   const canDelete = role === 'ADMIN';
 
-  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[]; allowedHosts?: string[] }>('/api/admin/sources');
+  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[]; policy?: { mode: 'open' | 'restricted'; restrictedTo: string[]; httpsRequired: boolean } }>('/api/admin/sources');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [queue, setQueue] = useState<QueueHealth | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,6 +103,12 @@ export function Crawler() {
   const [name, setName] = useState('');
   const [maxPages, setMaxPages] = useState(150);
   const [maxDepth, setMaxDepth] = useState(3);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [detail, setDetail] = useState<SourceDetail | null>(null);
+  const [docStatus, setDocStatus] = useState('');
+  const [testQuestion, setTestQuestion] = useState('');
+  const [retrieval, setRetrieval] = useState<RetrievalTest | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadJobs = useCallback(async () => {
@@ -119,6 +144,12 @@ export function Crawler() {
     };
   }, [active, loadJobs, reloadSources]);
 
+  // Keep an open detail panel current while a crawl is running.
+  useEffect(() => {
+    if (expanded && active) void loadDetail(expanded, 1, docStatus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
+
   async function start(body: Record<string, unknown>, label: string) {
     setBusy(label);
     setError(null);
@@ -147,7 +178,7 @@ export function Crawler() {
       let label = name.trim();
       if (!label) {
         try {
-          label = new URL(url).hostname;
+          label = new URL(url).hostname || url.trim().slice(0, 60);
         } catch {
           throw new Error('Enter a full URL, starting with https://');
         }
@@ -210,17 +241,71 @@ export function Crawler() {
     }
   }
 
-  async function remove(source: Source) {
-    if (!window.confirm(`Remove "${source.name}"? Its ${source.documentCount} indexed documents stay in the knowledge base.`)) return;
+  async function remove(source: Source, documents: 'archive' | 'keep') {
     setBusy(`delete:${source.id}`);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/sources/${source.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/sources/${source.id}?documents=${documents}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(apiMessage(await res.json(), 'Could not remove the source'));
-      notify('Source removed — its documents were kept');
+      notify(documents === 'archive' ? 'Source removed and taken out of search' : 'Source removed — its documents were kept');
+      setConfirmRemove(null);
+      if (expanded === source.id) setExpanded(null);
       await reloadSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove the source');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelJob(jobId: string) {
+    setBusy(`cancel:${jobId}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/ingestion?jobId=${jobId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(apiMessage(await res.json(), 'Could not cancel'));
+      notify('Cancelling — the crawler stops at the next page');
+      await loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not cancel');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const loadDetail = useCallback(async (id: string, page = 1, status = '') => {
+    const res = await fetch(`/api/admin/sources/${id}?page=${page}&pageSize=10${status ? `&status=${status}` : ''}`);
+    if (res.ok) setDetail((await res.json()) as SourceDetail);
+  }, []);
+
+  async function toggleDetail(source: Source) {
+    if (expanded === source.id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(source.id);
+    setDetail(null);
+    setRetrieval(null);
+    setDocStatus('');
+    await loadDetail(source.id);
+  }
+
+  async function testRetrieval(source: Source) {
+    if (!testQuestion.trim()) return;
+    setBusy(`test:${source.id}`);
+    setRetrieval(null);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/test-query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: testQuestion, sourceId: source.id }),
+      });
+      const json = (await res.json()) as RetrievalTest & { error?: string };
+      if (!res.ok) throw new Error(apiMessage(json, 'Retrieval test failed'));
+      setRetrieval(json);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retrieval test failed');
     } finally {
       setBusy(null);
     }
@@ -283,24 +368,22 @@ export function Crawler() {
               {busy === 'add' ? <span className="spin" /> : '＋'} &nbsp; Add source &amp; crawl
             </button>
           </form>
-          <details style={{ marginTop: 10 }}>
-            <summary className="fine" style={{ cursor: 'pointer' }}>Crawl limits (optional)</summary>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-              <label className="fine">
-                Max pages{' '}
-                <input id="maxPagesInput" type="number" min={1} max={2000} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} style={{ width: 100 }} />
-              </label>
-              <label className="fine">
-                Link depth{' '}
-                <input id="maxDepthInput" type="number" min={0} max={6} value={maxDepth} onChange={(e) => setMaxDepth(Math.max(0, Number(e.target.value) || 0))} style={{ width: 80 }} />
-              </label>
-            </div>
-          </details>
-          <p className="info-note" id="allowedHostsNote" style={{ marginTop: 10 }}>
-            <b>Authorized hosts:</b>{' '}
-            {sourceData?.allowedHosts?.length ? sourceData.allowedHosts.join(', ') : 'loading…'}{' '}
-            (their subdomains are included). Saving a source queues its first crawl automatically. The crawler respects robots.txt,
-            rate-limits itself, and never attempts to bypass a login. Any other host is rejected by the server, which names the host it read and what would be accepted.
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
+            <label className="fine">
+              Link depth{' '}
+              <input id="maxDepthInput" className="limit-input" type="number" min={0} max={6} value={maxDepth} onChange={(e) => setMaxDepth(Math.max(0, Number(e.target.value) || 0))} style={{ width: 80 }} />
+            </label>
+            <label className="fine">
+              Max pages{' '}
+              <input id="maxPagesInput" className="limit-input" type="number" min={1} max={2000} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} style={{ width: 100 }} />
+            </label>
+          </div>
+          <p className="info-note" id="policyNote" style={{ marginTop: 10 }}>
+            Add any public website you are permitted to crawl. {sourceData?.policy?.httpsRequired !== false && 'It must use https://. '}
+            Private, local, internal and cloud-metadata addresses are always refused, and each source is
+            limited to its own domain. The crawler obeys robots.txt (including crawl delays), is rate-limited,
+            and never logs in or follows links to other sites. Saving a source queues its first crawl automatically.
+            {sourceData?.policy?.mode === 'restricted' && <> This deployment only allows: <b>{sourceData.policy.restrictedTo.join(', ')}</b>.</>}
           </p>
         </div>
       )}
@@ -326,6 +409,13 @@ export function Crawler() {
           )}
         </div>
         <StageRail job={liveJob} />
+        {liveJob && (
+          <p className="tiny" id="liveCounts" style={{ marginTop: 10 }} data-testid="live-counts">
+            <b>{liveJob.pagesDiscovered}</b> pages discovered · <b>{liveJob.progress?.stages.extract.done ?? 0}</b> extracted ·{' '}
+            <b>{liveJob.progress?.stages.chunk.count ?? 0}</b> chunks created · <b>{liveJob.progress?.stages.embed.count ?? 0}</b> embeddings generated ·{' '}
+            <b>{liveJob.progress?.stages.index.count ?? 0}</b> vectors indexed · <b>{liveJob.progress?.stages.extract.errors ?? 0}</b> failed pages
+          </p>
+        )}
       </div>
 
       <div className="panel" style={{ marginBottom: 20 }}>
@@ -349,81 +439,213 @@ export function Crawler() {
                   <th title="Status of the most recent crawl job">Last crawl</th>
                   <th title="Documents stored for this source and their indexing state">Documents</th>
                   <th title="Whether this source's content is searchable right now">Retrieval</th>
-                  {canEdit && <th />}
+                  <th />
                 </tr>
               </thead>
               <tbody id="sourceRows">
-                {sourceData.sources.map((s) => (
-                  <tr key={s.id} data-source-id={s.id}>
-                    <td>
-                      <b>{s.name}</b>
-                      {s.rootUrl && (
-                        <>
-                          <br />
-                          <span className="fine">{s.rootUrl}</span>
-                        </>
-                      )}
-                      <div className="fine">
-                        depth {s.maxDepth} · up to {s.maxPages} pages{s.respectRobots && ' · robots ✓'}
-                        {' · '}
-                        {s.lastCrawledAt ? `crawled ${relativeTime(s.lastCrawledAt)}` : 'never crawled'}
-                      </div>
-                      {s.lastJob?.status === 'FAILED' && s.lastJob.error && (
-                        <div className="err" style={{ marginTop: 6 }}>
-                          {s.lastJob.error}
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <span className={statusClass(s.status)} data-testid="source-status">
-                        {s.status === 'ACTIVE' ? 'enabled' : s.status.toLowerCase()}
-                      </span>
-                    </td>
-                    <td>
-                      {s.lastJob ? (
-                        <span className={statusClass(s.lastJob.status)} data-testid="crawl-status">
-                          {s.lastJob.status.toLowerCase()}
-                        </span>
-                      ) : (
-                        <span className="fine">none</span>
-                      )}
-                    </td>
-                    <td className="fine" data-testid="doc-state">
-                      <b>{s.documents.indexed}</b> indexed
-                      {s.documents.pending > 0 && <> · {s.documents.pending} pending</>}
-                      {s.documents.failed > 0 && <> · {s.documents.failed} failed</>}
-                    </td>
-                    <td>
-                      <span className={statusClass(s.retrieval.state === 'not_ready' ? 'queued' : s.retrieval.state)} data-testid="retrieval-state">
-                        {RETRIEVAL_LABEL[s.retrieval.state]}
-                      </span>
-                      <div className="fine">{s.retrieval.vectors} / {s.retrieval.chunks} chunks</div>
-                    </td>
-                    {canEdit && (
-                      <td>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          <button
-                            className="btn primary"
-                            data-action="crawl"
-                            disabled={busy === s.id || active || s.status === 'PAUSED'}
-                            title={s.status === 'PAUSED' ? 'Resume the source to crawl it' : undefined}
-                            onClick={() => void start({ type: 'CRAWL', sourceId: s.id }, s.id)}
-                          >
-                            {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; Crawl
-                          </button>
-                          <button className="btn" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)}>
-                            {s.status === 'PAUSED' ? 'Resume' : 'Pause'}
-                          </button>
-                          {canDelete && (
-                            <button className="btn" disabled={busy === `delete:${s.id}`} onClick={() => void remove(s)}>
-                              Remove
-                            </button>
+                {sourceData.sources.map((s) => {
+                  const runningJob = jobs.find((j) => j.sourceName === s.name && (j.status === 'RUNNING' || j.status === 'QUEUED'));
+                  const isOpen = expanded === s.id;
+                  return (
+                    <Fragment key={s.id}>
+                      <tr data-source-id={s.id}>
+                        <td>
+                          <b>{s.name}</b>
+                          {s.rootUrl && (
+                            <>
+                              <br />
+                              <span className="fine">{s.rootUrl}</span>
+                            </>
                           )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
+                          <div className="fine">
+                            scope {s.scopeHost ?? '—'} · depth {s.maxDepth} · up to {s.maxPages} pages{s.respectRobots && ' · robots ✓'}
+                          </div>
+                          <div className="fine" data-testid="last-success">
+                            {s.lastCrawledAt ? `last successful crawl ${relativeTime(s.lastCrawledAt)}` : 'no successful crawl yet'}
+                          </div>
+                          {s.lastJob && (s.lastJob.status === 'FAILED' || s.lastJob.status === 'PARTIAL') && s.lastJob.error && (
+                            <div className={s.lastJob.status === 'FAILED' ? 'err' : 'info-note'} style={{ marginTop: 6 }} data-testid="source-error">
+                              {s.lastJob.error}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <span className={statusClass(s.status)} data-testid="source-status">
+                            {s.status === 'ACTIVE' ? 'enabled' : s.status.toLowerCase()}
+                          </span>
+                        </td>
+                        <td>
+                          {s.lastJob ? (
+                            <span className={statusClass(s.lastJob.status)} data-testid="crawl-status">
+                              {s.lastJob.status.toLowerCase()}
+                            </span>
+                          ) : (
+                            <span className="fine">none</span>
+                          )}
+                        </td>
+                        <td className="fine" data-testid="doc-state">
+                          <b>{s.documents.indexed}</b> indexed
+                          {s.documents.pending > 0 && <> · {s.documents.pending} pending</>}
+                          {s.documents.failed > 0 && <> · {s.documents.failed} failed</>}
+                        </td>
+                        <td>
+                          <span className={statusClass(s.retrieval.state === 'not_ready' ? 'queued' : s.retrieval.state)} data-testid="retrieval-state">
+                            {RETRIEVAL_LABEL[s.retrieval.state]}
+                          </span>
+                          <div className="fine">{s.retrieval.vectors} / {s.retrieval.chunks} chunks</div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            <button className="btn" data-action="details" aria-expanded={isOpen} onClick={() => void toggleDetail(s)}>
+                              {isOpen ? 'Hide' : 'Details'}
+                            </button>
+                            {canEdit && (
+                              <>
+                                {runningJob ? (
+                                  <button className="btn" data-action="cancel" disabled={busy === `cancel:${runningJob.id}`} onClick={() => void cancelJob(runningJob.id)}>
+                                    Cancel
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="btn primary"
+                                    data-action="crawl"
+                                    disabled={busy === s.id || active || s.status === 'PAUSED'}
+                                    title={s.status === 'PAUSED' ? 'Resume the source to crawl it' : 'Re-crawl: only changed pages are re-embedded'}
+                                    onClick={() => void start({ type: 'CRAWL', sourceId: s.id }, s.id)}
+                                  >
+                                    {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; {s.lastCrawledAt ? 'Re-crawl' : 'Crawl'}
+                                  </button>
+                                )}
+                                <button className="btn" data-action="toggle" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)} title="Pausing stops crawling; already-indexed content stays searchable">
+                                  {s.status === 'PAUSED' ? 'Resume' : 'Pause'}
+                                </button>
+                                {canDelete && (
+                                  <button className="btn" data-action="remove" onClick={() => setConfirmRemove(confirmRemove === s.id ? null : s.id)}>
+                                    Remove
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                          {confirmRemove === s.id && (
+                            <div className="info-note" style={{ marginTop: 8 }} data-testid="remove-confirm">
+                              <b>Remove “{s.name}”?</b>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                <button className="btn primary" data-action="remove-archive" disabled={busy === `delete:${s.id}`} onClick={() => void remove(s, 'archive')}>
+                                  Remove &amp; take out of search
+                                </button>
+                                <button className="btn" data-action="remove-keep" disabled={busy === `delete:${s.id}`} onClick={() => void remove(s, 'keep')}>
+                                  Remove, keep documents
+                                </button>
+                                <button className="btn" onClick={() => setConfirmRemove(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr data-detail-for={s.id}>
+                          <td colSpan={6} style={{ background: 'var(--muted)' }}>
+                            {!detail ? (
+                              <div className="empty">Loading…</div>
+                            ) : (
+                              <div data-testid="source-detail">
+                                <p className="tiny">
+                                  <b>{detail.chunkCount}</b> chunks across{' '}
+                                  {Object.entries(detail.documentCounts).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ') || 'no documents'}
+                                </p>
+
+                                <h3 style={{ margin: '12px 0 6px', fontSize: 14 }}>Test retrieval from this source</h3>
+                                <form
+                                  className="question-box"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    void testRetrieval(s);
+                                  }}
+                                >
+                                  <input aria-label="Test question for this source" data-testid="source-test-input" value={testQuestion} onChange={(e) => setTestQuestion(e.target.value)} placeholder="Ask something this website should be able to answer…" />
+                                  <button className="btn primary" data-action="source-test" disabled={busy === `test:${s.id}` || !testQuestion.trim()}>
+                                    {busy === `test:${s.id}` ? <span className="spin" /> : '⌕'} &nbsp; Test
+                                  </button>
+                                </form>
+                                {retrieval && (
+                                  <div data-testid="source-test-result" style={{ marginTop: 10 }}>
+                                    <p className="tiny"><b>Answer:</b> {retrieval.answer}</p>
+                                    <p className="tiny"><b>Citations:</b> {retrieval.citations.length ? retrieval.citations.map((c) => c.url ?? c.title).join(' · ') : 'none'}</p>
+                                    {retrieval.retrievedSources.slice(0, 4).map((p, i) => (
+                                      <div className="retrieval-card" key={i}>
+                                        <b style={{ fontSize: 12 }}>{p.title}</b> <span className="fine">· {p.url} · score {p.score}</span>
+                                        <p className="tiny">{p.snippet}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+
+                                <h3 style={{ margin: '14px 0 6px', fontSize: 14 }}>Indexed documents</h3>
+                                <label className="fine">
+                                  Show{' '}
+                                  <select aria-label="Document status filter" value={docStatus} onChange={(e) => { setDocStatus(e.target.value); void loadDetail(s.id, 1, e.target.value); }}>
+                                    <option value="">all</option>
+                                    <option value="INDEXED">indexed</option>
+                                    <option value="FAILED">failed</option>
+                                    <option value="EXTRACTED">pending</option>
+                                    <option value="ARCHIVED">archived</option>
+                                  </select>
+                                </label>
+                                <div className="table-wrap">
+                                  <table className="table" data-testid="source-docs">
+                                    <thead><tr><th>Title</th><th>Status</th><th>Chunks</th><th>Words</th></tr></thead>
+                                    <tbody>
+                                      {detail.documents.map((d) => (
+                                        <tr key={d.id}>
+                                          <td><b>{d.title}</b><br /><span className="fine">{d.url}</span>{d.failureReason && <div className="err">{d.failureReason}</div>}</td>
+                                          <td><span className={statusClass(d.status)}>{d.status.toLowerCase()}</span></td>
+                                          <td>{d.chunks}</td>
+                                          <td>{d.words}</td>
+                                        </tr>
+                                      ))}
+                                      {detail.documents.length === 0 && <tr><td colSpan={4} className="fine">No documents.</td></tr>}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                <div className="fine">
+                                  {detail.page.total} document{detail.page.total === 1 ? '' : 's'}
+                                  {detail.page.total > detail.page.pageSize && (
+                                    <>
+                                      {' · page '}{detail.page.page}{' '}
+                                      <button className="btn" disabled={detail.page.page <= 1} onClick={() => void loadDetail(s.id, detail.page.page - 1, docStatus)}>‹</button>{' '}
+                                      <button className="btn" disabled={detail.page.page * detail.page.pageSize >= detail.page.total} onClick={() => void loadDetail(s.id, detail.page.page + 1, docStatus)}>›</button>
+                                    </>
+                                  )}
+                                </div>
+
+                                <h3 style={{ margin: '14px 0 6px', fontSize: 14 }}>Recent crawls</h3>
+                                {detail.jobs.length === 0 && <div className="fine">No crawls yet.</div>}
+                                {detail.jobs.map((j) => (
+                                  <div className="retrieval-card" key={j.id}>
+                                    <span className={statusClass(j.status)}>{j.status.toLowerCase()}</span>{' '}
+                                    <span className="fine">
+                                      {relativeTime(j.createdAt)} · {j.pagesProcessed} pages · {j.documentsCreated} new · {j.documentsUpdated} updated · {j.documentsSkipped} unchanged · {j.chunksIndexed} chunks
+                                      {j.errorCount > 0 && ` · ${j.errorCount} failed`}
+                                    </span>
+                                    {j.error && <div className={j.status === 'FAILED' ? 'err' : 'info-note'} style={{ marginTop: 6 }}>{j.error}</div>}
+                                    {j.problems.length > 0 && (
+                                      <ul className="job-errors" style={{ listStyle: 'none' }}>
+                                        {j.problems.slice(0, 8).map((p, i) => (
+                                          <li key={i}><b>{p.level}</b> {p.message}{p.url && <span className="fine"> — {p.url}</span>}</li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

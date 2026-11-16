@@ -6,6 +6,7 @@ import { badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { recommendedChunking } from '@/lib/ingest/chunk';
+import { resetPolicyCache } from '@/lib/net/policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,18 @@ const TUNABLE = {
   LLM_MAX_TOKENS: z.number().int().min(200).max(8000),
   RESPONSE_MAX_WORDS: z.number().int().min(80).max(800),
   RESPONSE_MAX_RECOMMENDATIONS: z.number().int().min(1).max(8),
+  /** Hosts (subdomains included) the crawler must never contact. Takes effect within seconds, no restart. */
+  CRAWL_DENIED_HOSTS: z
+    .array(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .min(3)
+        .max(253)
+        .regex(/^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, 'must be a domain name like example.com'),
+    )
+    .max(200),
 } as const;
 
 export const GET = withErrorHandling(async () => {
@@ -57,7 +70,9 @@ export const GET = withErrorHandling(async () => {
       EMBEDDING_DIMENSIONS: env.EMBEDDING_DIMENSIONS,
       EMBEDDING_BASE_URL: env.EMBEDDING_BASE_URL,
       QDRANT_COLLECTION: env.QDRANT_COLLECTION,
-      CRAWL_ALLOWED_HOSTS: env.CRAWL_ALLOWED_HOSTS,
+      CRAWL_RESTRICT_HOSTS: env.CRAWL_RESTRICT_HOSTS,
+      CRAWL_DENIED_HOSTS_ENV: env.CRAWL_DENIED_HOSTS,
+      CRAWL_ALLOW_HTTP: env.CRAWL_ALLOW_HTTP,
     },
     chunkingAdvice: recommendedChunking(env.EMBEDDING_MODEL),
     overrides: overrideMap,
@@ -82,6 +97,7 @@ export const PUT = withErrorHandling(async (request: Request) => {
       throw badRequest(`"${key}" is invalid: ${parsed.error.issues[0]?.message ?? 'out of range'}`);
     }
 
+    if (key === 'CRAWL_DENIED_HOSTS') resetPolicyCache();
     await prisma.systemConfig.upsert({
       where: { key },
       create: { key, value: parsed.data as never, updatedBy: session.userId },

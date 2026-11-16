@@ -38,8 +38,9 @@ const INTENT_CATEGORIES: Record<Intent, string[]> = {
   off_topic: [],
 };
 
-export function buildFilters(analysis: QueryAnalysis, profile: UserProfile): SearchFilters {
+export function buildFilters(analysis: QueryAnalysis, profile: UserProfile, sourceIds?: string[]): SearchFilters {
   const filters: SearchFilters = { accessLevels: ['PUBLIC'], language: 'en' };
+  if (sourceIds?.length) filters.sourceIds = sourceIds;
 
   const audience = profile.audience;
   if (audience === 'employer') filters.audiences = ['employer', 'both'];
@@ -53,11 +54,11 @@ export function buildFilters(analysis: QueryAnalysis, profile: UserProfile): Sea
 export async function retrieve(
   analysis: QueryAnalysis,
   profile: UserProfile,
-  options: { topK?: number; finalK?: number } = {},
+  options: { topK?: number; finalK?: number; sourceIds?: string[] } = {},
 ): Promise<RetrievalResult> {
   const started = Date.now();
   const topK = options.topK ?? env.RETRIEVAL_TOP_K;
-  const filters = buildFilters(analysis, profile);
+  const filters = buildFilters(analysis, profile, options.sourceIds);
 
   // Multi-part questions get one retrieval per sub-question so a two-part ask
   // ("training AND how do I apply?") does not lose half its evidence.
@@ -128,6 +129,7 @@ export async function retrieve(
   const sources: RetrievedSource[] = scored.map((entry) => ({
     chunkId: entry.hit.payload.chunkId,
     documentId: entry.hit.payload.documentId,
+    sourceId: entry.hit.payload.sourceId ?? null,
     title: entry.hit.payload.title,
     url: entry.hit.payload.url,
     snippet: entry.hit.payload.content,

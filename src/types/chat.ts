@@ -113,6 +113,7 @@ export type Recommendation = {
 export type RetrievedSource = {
   chunkId: string;
   documentId: string;
+  sourceId?: string | null;
   title: string;
   url: string | null;
   snippet: string;

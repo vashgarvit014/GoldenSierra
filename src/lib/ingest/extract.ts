@@ -2,18 +2,18 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import { env } from '../env';
 import { logger } from '../logger';
-import { withRetry, withTimeout } from '../errors';
+import { withRetry } from '../errors';
+import { NetworkPolicyError } from '../net/policy';
+import { safeFetch, SafeFetchError, type SafeFetchOptions } from '../net/safe-fetch';
 
 /**
  * Page fetching and content extraction.
  *
- * Three strategies, tried in order of availability:
- *   1. Firecrawl  — when FIRECRAWL_API_KEY is set (handles JS-heavy pages)
- *   2. fetch + Cheerio — the default; the target site is server-rendered
- *   3. Playwright — opt-in, only if the package is installed
- *
- * The output shape is identical regardless of strategy so the rest of the
- * pipeline is unaware of which one ran.
+ * One strategy: a restricted fetch (`safeFetch`) plus Cheerio. Pages that only
+ * render with JavaScript are *reported* as such rather than silently indexed as
+ * empty. Third-party extraction services (Firecrawl) are intentionally not
+ * used: they fetch from their own network, so this application cannot enforce
+ * its SSRF, scope and robots rules on them.
  */
 
 export type ExtractedPage = {
@@ -29,7 +29,11 @@ export type ExtractedPage = {
   publishedAt: Date | null;
   httpStatus: number;
   contentType: string;
-  strategy: 'firecrawl' | 'cheerio' | 'playwright';
+  strategy: 'cheerio';
+  /** Decompressed bytes downloaded, for crawl budgets. */
+  byteLength: number;
+  /** Almost no text, and the markup looks like a client-rendered app shell. */
+  jsRequired: boolean;
 };
 
 /** Elements that are chrome, not content. Removing them stops every page from
@@ -80,62 +84,83 @@ const CONTENT_SELECTORS = [
   'body',
 ];
 
-export async function fetchPage(url: string): Promise<ExtractedPage> {
-  if (env.FIRECRAWL_API_KEY) {
-    try {
-      return await fetchWithFirecrawl(url);
-    } catch (err) {
-      logger.warn('Firecrawl failed; falling back to direct fetch', {
-        url,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return fetchWithCheerio(url);
+export type FetchPageOptions = { inScope?: (url: URL) => boolean } & Pick<SafeFetchOptions, 'resolver' | 'transport'>;
+
+export async function fetchPage(url: string, options: FetchPageOptions = {}): Promise<ExtractedPage> {
+  return fetchWithCheerio(url, options);
 }
 
-export async function fetchWithCheerio(url: string): Promise<ExtractedPage> {
+export class UnsupportedContentError extends Error {
+  constructor(
+    readonly url: string,
+    readonly contentType: string,
+  ) {
+    super(`${url} is not an HTML page (${contentType || 'unknown content type'})`);
+    this.name = 'UnsupportedContentError';
+  }
+}
+
+/** Transport failures and 5xx are worth retrying; policy, scope, size and 4xx never are. */
+function isTransient(err: unknown): boolean {
+  if (err instanceof NetworkPolicyError) return false;
+  if (err instanceof HttpStatusError) return err.status >= 500;
+  if (err instanceof SafeFetchError) return err.code === 'network' || err.code === 'timeout';
+  return false;
+}
+
+export async function fetchWithCheerio(url: string, options: FetchPageOptions = {}): Promise<ExtractedPage> {
   const response = await withRetry(
-    () =>
-      withTimeout(
-        fetch(url, {
-          headers: {
-            'User-Agent': env.CRAWL_USER_AGENT,
-            Accept: 'text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-          },
-          redirect: 'follow',
-        }),
-        env.CRAWL_TIMEOUT_MS,
-        `fetch ${url}`,
-      ),
-    {
-      attempts: 3,
-      baseMs: 700,
-      label: `fetch ${url}`,
-      // 4xx responses are permanent; only retry transport and 5xx errors.
-      retryOn: (e) => !(e instanceof HttpStatusError && e.status < 500),
+    async () => {
+      const res = await safeFetch(url, {
+        maxBytes: env.CRAWL_MAX_PAGE_BYTES,
+        allowedContentTypes: [/^text\/html/, /^application\/xhtml\+xml/, /^application\/pdf/, /^$/],
+        inScope: options.inScope,
+        resolver: options.resolver,
+        transport: options.transport,
+      });
+      if (res.status >= 400) throw new HttpStatusError(url, res.status);
+      return res;
     },
+    { attempts: 3, baseMs: 700, label: `fetch ${url}`, retryOn: isTransient },
   );
 
-  if (!response.ok) throw new HttpStatusError(url, response.status);
-
-  const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('application/pdf')) {
+  if (response.contentType.includes('application/pdf')) {
     throw new Error(`${url} is a PDF; route it through the PDF extractor instead`);
   }
+  if (response.contentType && !/html|xhtml/.test(response.contentType)) {
+    throw new UnsupportedContentError(url, response.contentType);
+  }
 
-  const html = await response.text();
-  const parsed = parseHtml(html, response.url || url);
+  const html = response.text();
+  const finalUrl = response.url || url;
+  const parsed = parseHtml(html, finalUrl);
 
   return {
     ...parsed,
-    url: response.url || url,
+    url: finalUrl,
     httpStatus: response.status,
-    contentType,
+    contentType: response.contentType,
     html,
     strategy: 'cheerio',
+    byteLength: response.body.length,
+    jsRequired: looksJsRendered(html, parsed.text),
   };
+}
+
+/**
+ * A page with almost no extracted text whose markup is an app shell
+ * (`<div id="root">`, `<noscript>Enable JavaScript`) needs a browser to render.
+ * Reporting that is more honest than indexing an empty page and calling it done.
+ */
+export function looksJsRendered(html: string, extractedText: string): boolean {
+  const words = extractedText.split(/\s+/).filter(Boolean).length;
+  if (words >= 40) return false;
+  const shell =
+    /<div[^>]+id=["'](root|app|__next|__nuxt|svelte)["']/i.test(html) ||
+    /\bng-app\b|data-reactroot|window\.__NUXT__|__NEXT_DATA__/i.test(html) ||
+    /<noscript[^>]*>[^<]*(enable|requires?|turn on)[^<]*javascript/i.test(html);
+  const scripts = (html.match(/<script\b/gi) ?? []).length;
+  return shell || scripts >= 5;
 }
 
 export class HttpStatusError extends Error {
@@ -151,7 +176,7 @@ export class HttpStatusError extends Error {
 export function parseHtml(
   html: string,
   baseUrl: string,
-): Omit<ExtractedPage, 'url' | 'httpStatus' | 'contentType' | 'html' | 'strategy'> {
+): Omit<ExtractedPage, 'url' | 'httpStatus' | 'contentType' | 'html' | 'strategy' | 'byteLength' | 'jsRequired'> {
   const $ = cheerio.load(html);
 
   const title =
@@ -283,59 +308,4 @@ function stripHash(url: string): string {
 function safeDate(value: string): Date | null {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-// ── Firecrawl ────────────────────────────────────────────────────────────
-
-async function fetchWithFirecrawl(url: string): Promise<ExtractedPage> {
-  const response = await withTimeout(
-    fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.FIRECRAWL_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ url, formats: ['markdown', 'links'], onlyMainContent: true }),
-    }),
-    env.CRAWL_TIMEOUT_MS,
-    `firecrawl ${url}`,
-  );
-
-  if (!response.ok) throw new Error(`Firecrawl returned HTTP ${response.status}`);
-
-  const body = (await response.json()) as {
-    success?: boolean;
-    data?: {
-      markdown?: string;
-      links?: string[];
-      metadata?: {
-        title?: string;
-        description?: string;
-        sourceURL?: string;
-        statusCode?: number;
-        publishedTime?: string;
-      };
-    };
-  };
-
-  const data = body.data;
-  if (!body.success || !data?.markdown) throw new Error('Firecrawl returned no content');
-
-  const links = (data.links ?? []).filter((l) => /^https?:/i.test(l));
-  const meta = data.metadata ?? {};
-
-  return {
-    url: meta.sourceURL ?? url,
-    canonicalUrl: meta.sourceURL ?? null,
-    title: cleanTitle(meta.title ?? url),
-    text: normalizeText(data.markdown),
-    html: null,
-    links: links.filter((l) => !/\.pdf(\?|#|$)/i.test(l)),
-    pdfLinks: links.filter((l) => /\.pdf(\?|#|$)/i.test(l)),
-    description: meta.description ?? null,
-    publishedAt: meta.publishedTime ? safeDate(meta.publishedTime) : null,
-    httpStatus: meta.statusCode ?? 200,
-    contentType: 'text/html',
-    strategy: 'firecrawl',
-  };
 }

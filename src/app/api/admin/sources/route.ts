@@ -4,9 +4,12 @@ import { AdminRole, JobType, SourceType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { AppError, badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
-import { checkCrawlHost, explainHostRejection } from '@/lib/ingest/crawler';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { allowHttp } from '@/lib/net/policy';
+import { checkRateLimit } from '@/lib/rate-limit';
+import { SourceUrlError, validateSourceUrl } from '@/lib/ingest/source-url';
+import { scopeHostOf } from '@/lib/ingest/crawler';
 import { CRAWLABLE_TYPES, sourceKey } from '@/lib/ingest/sources';
 import { createJob } from '@/lib/ingest/pipeline';
 import { enqueueJob, queueHealth } from '@/lib/ingest/queue';
@@ -18,12 +21,14 @@ export const dynamic = 'force-dynamic';
 const CreateSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.enum(['WEBSITE', 'SITEMAP', 'SINGLE_PAGE', 'PDF_UPLOAD', 'MANUAL']),
-  rootUrl: z.string().url().max(2000).optional(),
+  // Syntax is checked by validateSourceUrl, which explains *why* a URL is refused.
+  rootUrl: z.string().max(2000).optional(),
   includePatterns: z.array(z.string().max(300)).max(20).default([]),
   excludePatterns: z.array(z.string().max(300)).max(20).default([]),
   maxDepth: z.number().int().min(0).max(6).default(3),
   maxPages: z.number().int().min(1).max(2000).default(200),
-  respectRobots: z.boolean().default(true),
+  /** robots.txt compliance cannot be switched off from the dashboard. */
+  respectRobots: z.literal(true).default(true),
   defaultCategory: z.string().max(60).optional(),
   recrawlCron: z.string().max(100).optional(),
   /** Queue the first crawl as soon as the source is saved (default). */
@@ -77,7 +82,13 @@ export const GET = withErrorHandling(async () => {
   };
 
   return NextResponse.json({
-    allowedHosts: env.CRAWL_ALLOWED_HOSTS,
+    policy: {
+      // No fixed domain list: any public website may be registered.
+      mode: env.CRAWL_RESTRICT_HOSTS.length ? 'restricted' : 'open',
+      restrictedTo: env.CRAWL_RESTRICT_HOSTS,
+      httpsRequired: !allowHttp(),
+      maxPagesCap: env.CRAWL_MAX_PAGES,
+    },
     sources: sources.map((s) => {
       const docs = docsFor(s.id);
       return {
@@ -85,6 +96,7 @@ export const GET = withErrorHandling(async () => {
       name: s.name,
       type: s.type,
       rootUrl: s.rootUrl,
+      scopeHost: s.rootUrl ? scopeHostOf(s.rootUrl) : null,
       status: s.status,
       documentCount: s._count.documents,
       maxDepth: s.maxDepth,
@@ -120,27 +132,39 @@ export const POST = withErrorHandling(async (request: Request) => {
   });
   const body = CreateSchema.parse(json);
 
-  if (body.type !== 'PDF_UPLOAD' && body.type !== 'MANUAL' && !body.rootUrl) {
-    throw badRequest('A root URL is required for this source type');
+  const crawlable = (CRAWLABLE_TYPES as readonly string[]).includes(body.type);
+  if (crawlable && !body.rootUrl) throw badRequest('A website URL is required for this source type');
+
+  // Registration is rate limited per administrator and capped overall, so a
+  // compromised or careless account cannot register unbounded sources.
+  const limited = await checkRateLimit(`source-add:${session.userId}`, env.SOURCE_ADD_RATE_PER_HOUR, 3_600_000);
+  if (!limited.allowed) {
+    throw new AppError(
+      `Too many sources added recently (limit ${env.SOURCE_ADD_RATE_PER_HOUR} per hour). Try again later.`,
+      429,
+      'rate_limited',
+    );
+  }
+  if ((await prisma.knowledgeSource.count()) >= env.MAX_SOURCES) {
+    throw badRequest(`This deployment is limited to ${env.MAX_SOURCES} sources. Remove one first.`);
   }
 
-  // The deployment-level allowlist is the final word on what may be crawled;
-  // an admin cannot widen it from the dashboard. Say exactly which host was
-  // read and what would be accepted, so a rejection is never a guessing game.
+  // Validate the site: syntax, https, no credentials, not local/private, the
+  // denylist, and a DNS answer that is public — all server-side.
+  let rootUrl: string | null = null;
   if (body.rootUrl) {
-    const verdict = checkCrawlHost(body.rootUrl);
-    if (!verdict.ok) {
-      logger.warn('Source rejected by crawl allowlist', {
-        host: verdict.host,
-        reason: verdict.reason,
-        allowed: verdict.allowed,
-      });
-      throw badRequest(explainHostRejection(verdict), {
-        reason: verdict.reason,
-        host: verdict.host,
-        allowedHosts: verdict.allowed,
-        suggestion: verdict.suggestion,
-      });
+    try {
+      rootUrl = (await validateSourceUrl(body.rootUrl)).url;
+    } catch (err) {
+      if (err instanceof SourceUrlError) {
+        logger.warn('Source rejected', { host: err.host, reason: err.reason });
+        await recordAudit(session.userId, 'source_rejected', 'KnowledgeSource', null, {
+          reason: err.reason,
+          host: err.host,
+        });
+        throw badRequest(err.message, { reason: err.reason, host: err.host });
+      }
+      throw err;
     }
   }
 
@@ -153,7 +177,7 @@ export const POST = withErrorHandling(async (request: Request) => {
   }
 
   // One site, one source — spelled differently or not.
-  const key = sourceKey(body.rootUrl);
+  const key = sourceKey(rootUrl);
   if (key) {
     const existing = await prisma.knowledgeSource.findMany({
       where: { rootUrl: { not: null } },
@@ -174,7 +198,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     data: {
       name: body.name,
       type: body.type as SourceType,
-      rootUrl: body.rootUrl ?? null,
+      rootUrl,
       includePatterns: body.includePatterns,
       excludePatterns: body.excludePatterns,
       maxDepth: body.maxDepth,
@@ -186,7 +210,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     },
   });
 
-  await recordAudit(session.userId, 'create', 'KnowledgeSource', source.id, { name: source.name });
+  await recordAudit(session.userId, 'create', 'KnowledgeSource', source.id, { name: source.name, host: rootUrl ? scopeHostOf(rootUrl) : null });
 
   // Queue the first crawl. The source row is already saved, so a failure here
   // is reported alongside it rather than undoing the save.

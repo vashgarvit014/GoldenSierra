@@ -11,6 +11,7 @@ import {
   collectionStats,
   ensureCollection,
   pointIdForChunk,
+  setSourceIdPayload,
   upsertPoints,
   type UpsertPoint,
   type VectorPayload,
@@ -28,7 +29,7 @@ import {
   isLowValue,
   wordCount,
 } from './clean';
-import { crawl, normalizeUrl, type CrawlTarget } from './crawler';
+import { crawl, normalizeUrl, scopeHostOf, urlInScope, type CrawlTarget } from './crawler';
 import { fetchAndExtractPdf, extractPdfFromBuffer } from './pdf';
 import type { ExtractedPage } from './extract';
 import {
@@ -298,6 +299,7 @@ export async function indexDocument(
     const payload: VectorPayload = {
       chunkId: id,
       documentId: document.id,
+      sourceId: document.sourceId,
       title: document.title,
       url: document.url,
       content: chunk.content,
@@ -399,6 +401,35 @@ export async function archiveDocument(documentId: string): Promise<void> {
   logger.info('Archived document and purged its vectors', { documentId });
 }
 
+/**
+ * Takes every document of a source out of search: vectors and chunks are
+ * removed and the rows are kept as ARCHIVED, so the source's history survives
+ * but nothing it contained can be retrieved.
+ */
+export async function archiveSourceDocuments(sourceId: string): Promise<number> {
+  const docs = await prisma.document.findMany({
+    where: { sourceId, status: { not: DocumentStatus.ARCHIVED } },
+    select: { id: true },
+  });
+  for (const doc of docs) await archiveDocument(doc.id);
+  return docs.length;
+}
+
+/** Tags vectors written before `sourceId` existed in the payload. Safe to re-run. */
+export async function backfillSourceIds(): Promise<{ sources: number; documents: number }> {
+  const sources = await prisma.knowledgeSource.findMany({ select: { id: true } });
+  let documents = 0;
+  for (const source of sources) {
+    const docs = await prisma.document.findMany({
+      where: { sourceId: source.id, status: DocumentStatus.INDEXED },
+      select: { id: true },
+    });
+    await setSourceIdPayload(source.id, docs.map((d) => d.id));
+    documents += docs.length;
+  }
+  return { sources: sources.length, documents };
+}
+
 export async function deleteDocument(documentId: string): Promise<void> {
   await deleteByDocument(documentId);
   await prisma.document.delete({ where: { id: documentId } });
@@ -456,6 +487,9 @@ export async function runCrawlJob(jobId: string): Promise<void> {
   };
 
   const indexQueue: string[] = [];
+  // Honest accounting of what actually became searchable, independent of how
+  // many pages were merely visited.
+  const tally = { unchanged: 0, lowValue: 0, duplicates: 0, jsLimited: 0, indexFailures: 0, pdfFailures: 0, pdfOk: 0 };
 
   try {
     await ensureCollection();
@@ -481,6 +515,14 @@ export async function runCrawlJob(jobId: string): Promise<void> {
           return;
         }
 
+        if (result.duplicateOf) {
+          tally.duplicates++;
+          tracker.counters.documentsSkipped++;
+          tracker.log('info', `Duplicate of ${result.duplicateOf}; not indexed twice`, result.page.url);
+          await tracker.flush();
+          return;
+        }
+
         try {
           const outcome = await upsertDocument({
             url: result.page.url,
@@ -498,6 +540,16 @@ export async function runCrawlJob(jobId: string): Promise<void> {
           else if (outcome.action === 'updated') tracker.counters.documentsUpdated++;
           else tracker.counters.documentsSkipped++;
 
+          if (outcome.action === 'unchanged') tally.unchanged++;
+          if (outcome.action === 'skipped') {
+            tally.lowValue++;
+            if (result.page.jsRequired) {
+              tally.jsLimited++;
+              tracker.log('warn', 'Page appears to need JavaScript to render; only its static HTML was available, so nothing was indexed. Client-rendered sites are not supported.', result.page.url);
+            } else {
+              tracker.log('warn', `Skipped: ${outcome.reason ?? 'too little content'}`, result.page.url);
+            }
+          }
           if (outcome.action === 'created' || outcome.action === 'updated') {
             indexQueue.push(outcome.documentId);
           }
@@ -510,6 +562,12 @@ export async function runCrawlJob(jobId: string): Promise<void> {
     });
 
     tracker.log('info', `Crawl visited ${summary.visited} pages (${summary.failed} failed)`);
+    if (summary.sitemapUrls) tracker.log('info', `Sitemap listed ${summary.sitemapUrls} in-scope URLs`);
+    if (summary.skippedOffScope) tracker.log('info', `Ignored ${summary.skippedOffScope} links to other domains (outside this source's scope)`);
+    if (summary.skippedByRobots) tracker.log('warn', `${summary.skippedByRobots} URL(s) were skipped because robots.txt disallows them`);
+    if (summary.budgetExhausted && summary.budgetExhausted !== 'pages') {
+      tracker.log('warn', `Crawl stopped early: the ${summary.budgetExhausted === 'bytes' ? 'download-size' : 'time'} budget was used up`);
+    }
 
     // Discovery and extraction are over; what remains is turning changed
     // documents into searchable vectors.
@@ -532,6 +590,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
       } catch (err) {
         const message = describeError(err, 500);
         tracker.log('error', `Indexing failed: ${message}`);
+        tally.indexFailures++;
         for (const id of ['chunk', 'embed', 'index'] as const) bumpStage(tracker.progress, id, { errors: 1 });
         await prisma.document.update({
           where: { id: documentId },
@@ -545,30 +604,65 @@ export async function runCrawlJob(jobId: string): Promise<void> {
     for (const pdfUrl of summary.pdfLinks.slice(0, 50)) {
       if (await wasCancelled(jobId)) break;
       try {
-        const outcome = await ingestPdfFromUrl(pdfUrl, source.id, tracker.indexHooks());
+        const outcome = await ingestPdfFromUrl(pdfUrl, source.id, tracker.indexHooks(), (u) => urlInScope(u, scopeHostOf(source.rootUrl!)));
         if (outcome.action === 'created') tracker.counters.documentsCreated++;
         else if (outcome.action === 'updated') tracker.counters.documentsUpdated++;
         else tracker.counters.documentsSkipped++;
+        if (outcome.action !== 'skipped') tally.pdfOk++;
       } catch (err) {
+        tally.pdfFailures++;
+        tracker.counters.errorCount++;
         tracker.log('warn', `PDF skipped: ${describeError(err, 500)}`, pdfUrl);
       }
       await tracker.flush();
     }
 
     const cancelled = await wasCancelled(jobId);
-    settleStages(tracker.progress, cancelled ? 'failed' : 'completed');
+    const indexedNow = indexQueue.length - tally.indexFailures;
+    const searchable = indexedNow + tally.unchanged + tally.pdfOk;
+    const failures = summary.failed + tally.indexFailures + tally.pdfFailures;
+    const stoppedByBudget = summary.budgetExhausted === 'bytes' || summary.budgetExhausted === 'time';
+
+    let status: JobStatus = JobStatus.COMPLETED;
+    let note: string | null = null;
+    if (cancelled) {
+      status = JobStatus.CANCELLED;
+    } else if (summary.robotsBlocked) {
+      status = JobStatus.FAILED;
+      note = "robots.txt disallows crawling this site, so nothing was fetched. The crawler honours robots.txt and cannot override it.";
+    } else if (searchable === 0) {
+      // Saved is not ingested: with no searchable documents this must not read as success.
+      status = JobStatus.FAILED;
+      const parts = [`No indexable content was found (${summary.visited} page${summary.visited === 1 ? '' : 's'} visited).`];
+      if (summary.failed) parts.push(`${summary.failed} failed to load — first: ${summary.errors[0]?.reason ?? 'unknown error'}.`);
+      if (tally.jsLimited) parts.push(`${tally.jsLimited} appear to need JavaScript rendering, which is not supported.`);
+      if (tally.lowValue - tally.jsLimited > 0) parts.push(`${tally.lowValue - tally.jsLimited} had too little text to index.`);
+      if (summary.skippedByRobots) parts.push(`${summary.skippedByRobots} were blocked by robots.txt.`);
+      if (tally.indexFailures) parts.push(`${tally.indexFailures} could not be embedded or indexed.`);
+      note = parts.join(' ');
+    } else if (failures > 0 || stoppedByBudget) {
+      status = JobStatus.PARTIAL;
+      const parts = [`${searchable} document${searchable === 1 ? ' is' : 's are'} searchable.`];
+      if (summary.failed) parts.push(`${summary.failed} page${summary.failed === 1 ? '' : 's'} failed (first: ${summary.errors[0]?.reason ?? 'unknown'}).`);
+      if (tally.indexFailures) parts.push(`${tally.indexFailures} could not be indexed.`);
+      if (tally.pdfFailures) parts.push(`${tally.pdfFailures} PDF${tally.pdfFailures === 1 ? '' : 's'} failed.`);
+      if (stoppedByBudget) parts.push(`Stopped early: ${summary.budgetExhausted === 'bytes' ? 'download-size' : 'time'} budget reached.`);
+      note = parts.join(' ');
+    }
+
+    settleStages(tracker.progress, status === JobStatus.FAILED || cancelled ? 'failed' : 'completed');
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
-      data: {
-        status: cancelled ? JobStatus.CANCELLED : JobStatus.COMPLETED,
-        finishedAt: new Date(),
-      },
+      data: { status, error: note ? note.slice(0, 2000) : null, finishedAt: new Date() },
     });
-    await prisma.knowledgeSource.update({
-      where: { id: source.id },
-      data: { lastCrawledAt: new Date() },
-    });
+    // "Last crawled" means last *successful* crawl: a run that ingested nothing does not count.
+    if (status === JobStatus.COMPLETED || status === JobStatus.PARTIAL) {
+      await prisma.knowledgeSource.update({
+        where: { id: source.id },
+        data: { lastCrawledAt: new Date() },
+      });
+    }
 
     log.info('Crawl job finished', tracker.counters as unknown as Record<string, unknown>);
   } catch (err) {
@@ -673,8 +767,9 @@ export async function ingestPdfFromUrl(
   url: string,
   sourceId?: string | null,
   hooks?: IndexHooks,
+  inScope?: (url: URL) => boolean,
 ): Promise<UpsertOutcome> {
-  const pdf = await fetchAndExtractPdf(url);
+  const pdf = await fetchAndExtractPdf(url, { inScope });
   const outcome = await upsertDocument({
     url,
     title: pdf.title,

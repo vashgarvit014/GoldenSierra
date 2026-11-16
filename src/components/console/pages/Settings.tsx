@@ -7,6 +7,7 @@ type ConfigPayload = {
   effective: Record<string, number | boolean>;
   readOnly: Record<string, string | number | string[]>;
   chunkingAdvice: { chunkSize: number; chunkOverlap: number; rationale: string };
+  overrides?: Record<string, unknown>;
 };
 
 /** Only these are tunable at runtime; credentials never are. */
@@ -101,6 +102,8 @@ export function Settings() {
             </div>
           </div>
 
+          <DenylistPanel initial={Array.isArray(data.overrides?.CRAWL_DENIED_HOSTS) ? (data.overrides!.CRAWL_DENIED_HOSTS as string[]) : []} />
+
           <div className="panel">
             <div className="panel-head">
               <h2>Retrieval &amp; generation</h2>
@@ -151,5 +154,64 @@ export function Settings() {
         </>
       )}
     </>
+  );
+}
+
+/** Administrator-controlled crawl denylist. Applies within seconds, with no restart. */
+function DenylistPanel({ initial }: { initial: string[] }) {
+  const { notify, role } = useConsole();
+  const [text, setText] = useState(initial.join('\n'));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const hosts = text.split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean);
+      const res = await fetch('/api/admin/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ CRAWL_DENIED_HOSTS: hosts }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error ?? 'Could not save');
+      notify('Crawl denylist saved');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ marginBottom: 20 }} id="denylistPanel">
+      <div className="panel-head">
+        <h2>Crawl denylist</h2>
+        <span className="fine">Domains the crawler must never contact — subdomains included</span>
+      </div>
+      <p className="tiny">
+        Any public website can be added as a source. List domains here to block them even if someone
+        registers them. One per line; applies to new sources and to every later crawl.
+      </p>
+      {error && <div className="err" role="alert">{error}</div>}
+      <textarea
+        aria-label="Denied crawl domains"
+        id="denylistInput"
+        rows={4}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={role !== 'ADMIN'}
+        placeholder="example.com"
+        style={{ width: '100%', fontFamily: 'monospace' }}
+      />
+      {role === 'ADMIN' ? (
+        <button className="btn primary" id="saveDenylist" disabled={saving} onClick={() => void save()} style={{ marginTop: 8 }}>
+          {saving ? <span className="spin" /> : null} Save denylist
+        </button>
+      ) : (
+        <p className="fine">Only administrators can change this list.</p>
+      )}
+    </div>
   );
 }

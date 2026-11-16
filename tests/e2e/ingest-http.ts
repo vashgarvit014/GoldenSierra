@@ -116,7 +116,7 @@ async function pollJob(id: string, cookie: string, want: string, ms = 30000) {
     jobIds.add(q.body.jobId);
     const job = await pollJob(q.body.jobId, cookie, 'FAILED', 40000);
     check('worker marks it FAILED', job?.status === 'FAILED', JSON.stringify(job?.status));
-    check('FAILED row carries the cause (fetch failed ← …ENOTFOUND)', /fetch failed/.test(job?.error ?? '') && /ENOTFOUND|EAI_AGAIN/.test(job?.error ?? ''), String(job?.error));
+    check('FAILED row carries the cause (…ENOTFOUND)', /ENOTFOUND|EAI_AGAIN/.test(job?.error ?? ''), String(job?.error));
   }
 
   // ── upload API ──
@@ -177,9 +177,16 @@ async function pollJob(id: string, cookie: string, want: string, ms = 30000) {
   const sourceIds: string[] = [];
   check('source: unauthenticated → 401', (await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'https://goldensierra.com/x' })).status === 401);
   check('source: VIEWER → 403', (await mkSource({ rootUrl: 'https://goldensierra.com/x' }, viewer)).status === 403);
-  const noHost = await mkSource({ rootUrl: 'https://goldensiera.org/' });
-  check('source: the rejection names the host, lists allowed hosts and suggests the fix', noHost.status === 400 && /"goldensiera\.org"/.test(noHost.body.error) && /goldensierra\.com, www\.goldensierra\.com/.test(noHost.body.error) && /Did you mean goldensierra\.com/.test(noHost.body.error) && noHost.body.details?.host === 'goldensiera.org', JSON.stringify(noHost.body));
-  check('source: host not on the allowlist → 400 with a readable reason', noHost.status === 400 && /not an authorized crawl host/i.test(noHost.body.error), JSON.stringify(noHost.body));
+  const noHost = await mkSource({ rootUrl: 'https://127.0.0.1/' });
+  check('source: a private address → 400, naming the host and the reason', noHost.status === 400 && /private|loopback|reserved/i.test(noHost.body.error) && noHost.body.details?.reason === 'blocked_address' && noHost.body.details?.host === '127.0.0.1', JSON.stringify(noHost.body));
+  const metadata = await mkSource({ rootUrl: 'https://169.254.169.254/latest/meta-data/' });
+  check('source: cloud metadata address → 400', metadata.status === 400 && metadata.body.details?.reason === 'blocked_address', JSON.stringify(metadata.body));
+  const plainHttp = await mkSource({ rootUrl: 'http://goldensierra.com/' });
+  check('source: plain http:// → 400 (HTTPS required)', plainHttp.status === 400 && plainHttp.body.details?.reason === 'bad_scheme', JSON.stringify(plainHttp.body));
+  const creds = await mkSource({ rootUrl: 'https://user:topsecret@goldensierra.com/' });
+  check('source: embedded credentials → 400, never echoed', creds.status === 400 && !JSON.stringify(creds.body).includes('topsecret'), JSON.stringify(creds.body));
+  const robotsOff = await mkSource({ rootUrl: 'https://goldensierra.com/x', respectRobots: false });
+  check('source: robots.txt compliance cannot be turned off → 400', robotsOff.status === 400, JSON.stringify(robotsOff.body));
   const badScheme = await mkSource({ rootUrl: 'ftp://goldensierra.com/' });
   check('source: non-http scheme → 400', badScheme.status === 400, JSON.stringify(badScheme.body));
   const shortName = await postJson('/api/admin/sources', { name: 'x', type: 'WEBSITE', rootUrl: 'https://goldensierra.com/x' }, cookie);

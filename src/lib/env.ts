@@ -80,7 +80,22 @@ const schema = z.object({
   CRAWL_MAX_DEPTH: int(3),
   CRAWL_TIMEOUT_MS: int(30_000),
   CRAWL_RESPECT_ROBOTS: bool(true),
-  CRAWL_ALLOWED_HOSTS: csv(['goldensierra.com', 'www.goldensierra.com']),
+  /** DEPRECATED and ignored: crawling is no longer limited to a fixed domain list. */
+  CRAWL_ALLOWED_HOSTS: csv([]),
+  /** Optional deployment-level restriction. Empty (default) = any public website may be registered. */
+  CRAWL_RESTRICT_HOSTS: csv([]),
+  /** Hosts that may never be crawled (subdomains included). Extended at runtime by the stored CRAWL_DENIED_HOSTS setting. */
+  CRAWL_DENIED_HOSTS: csv([]),
+  /** Plain http:// sources are refused unless this is true. */
+  CRAWL_ALLOW_HTTP: bool(false),
+  CRAWL_MAX_REDIRECTS: int(5),
+  CRAWL_MAX_PAGE_BYTES: int(5 * 1024 * 1024),
+  CRAWL_MAX_SITEMAP_BYTES: int(10 * 1024 * 1024),
+  CRAWL_MAX_JOB_BYTES: int(250 * 1024 * 1024),
+  CRAWL_MAX_JOB_MINUTES: int(30),
+  /** New sources an administrator may register per hour. */
+  SOURCE_ADD_RATE_PER_HOUR: int(20),
+  MAX_SOURCES: int(200),
   FIRECRAWL_API_KEY: z.string().optional(),
 
   AUTH_SECRET: z.string().optional(),
@@ -113,6 +128,11 @@ let cache: ParsedEnv | undefined;
 /** True while `next build` is collecting route metadata. */
 function isBuildPhase(): boolean {
   return process.env.NEXT_PHASE === 'phase-production-build';
+}
+
+/** Test hook: re-read process.env on next access. */
+export function resetEnvCache(): void {
+  cache = undefined;
 }
 
 function loadEnv(): ParsedEnv {

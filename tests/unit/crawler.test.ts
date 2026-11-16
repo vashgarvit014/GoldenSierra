@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHostAllowed, normalizeUrl, shouldCrawl, type CrawlTarget } from '@/lib/ingest/crawler';
+import { normalizeUrl, scopeHostOf, shouldCrawl, urlInScope, type CrawlTarget } from '@/lib/ingest/crawler';
 
 /**
  * Crawl authorization is a boundary, not an optimisation: these rules are what
@@ -16,24 +16,29 @@ const target = (overrides: Partial<CrawlTarget> = {}): CrawlTarget => ({
   ...overrides,
 });
 
-describe('isHostAllowed', () => {
-  it('allows a configured host and its subdomains', () => {
-    expect(isHostAllowed('https://goldensierra.com/page')).toBe(true);
-    expect(isHostAllowed('https://www.goldensierra.com/page')).toBe(true);
+describe('per-source scope', () => {
+  it('a source is scoped to its own host, ignoring a leading www.', () => {
+    expect(scopeHostOf('https://www.goldensierra.com/x')).toBe('goldensierra.com');
+    expect(urlInScope('https://goldensierra.com/page', 'goldensierra.com')).toBe(true);
+    expect(urlInScope('https://www.goldensierra.com/page', 'goldensierra.com')).toBe(true);
   });
 
-  it('refuses any other host', () => {
-    expect(isHostAllowed('https://example.com/page')).toBe(false);
-    expect(isHostAllowed('https://evil.com/goldensierra.com')).toBe(false);
+  it('never follows links to other domains, subdomains or lookalikes', () => {
+    for (const u of [
+      'https://example.com/page',
+      'https://evil.com/goldensierra.com',
+      'https://notgoldensierra.com/page',
+      'https://goldensierra.com.evil.com/',
+      'https://jobs.goldensierra.com/', // a subdomain is a different site: register it separately
+    ]) {
+      expect(urlInScope(u, 'goldensierra.com')).toBe(false);
+    }
+    expect(urlInScope('not a url', 'goldensierra.com')).toBe(false);
   });
 
-  it('refuses a lookalike domain that merely ends with the allowed string', () => {
-    // "notgoldensierra.com" must not pass a naive endsWith check.
-    expect(isHostAllowed('https://notgoldensierra.com/page')).toBe(false);
-  });
-
-  it('refuses malformed input', () => {
-    expect(isHostAllowed('not a url')).toBe(false);
+  it('works for any registered domain, not a fixed list', () => {
+    expect(urlInScope('https://docs.acme.example/a', 'docs.acme.example')).toBe(true);
+    expect(urlInScope('https://acme.example/a', 'docs.acme.example')).toBe(false);
   });
 });
 
@@ -42,10 +47,10 @@ describe('shouldCrawl', () => {
     expect(shouldCrawl('https://goldensierra.com/help-for-job-seekers', target()).ok).toBe(true);
   });
 
-  it('refuses an unauthorized host', () => {
+  it('refuses a host outside the source scope', () => {
     const result = shouldCrawl('https://example.com/page', target());
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/not authorized/);
+    expect(result.reason).toMatch(/outside source scope/);
   });
 
   it('refuses non-http schemes', () => {

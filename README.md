@@ -205,8 +205,11 @@ npm run ingest -- --url=<pdf-url>   # ingest a single PDF
 The crawler:
 
 - seeds from the site's XML sitemap, then follows internal links;
-- **only visits hosts listed in `CRAWL_ALLOWED_HOSTS`** — an admin cannot widen
-  this from the dashboard;
+- **crawls any public HTTPS website an administrator registers** — no per-domain
+  configuration. Private, loopback, link-local and cloud-metadata addresses are refused;
+  DNS answers are validated and the connection is pinned to them; every redirect is
+  re-validated; each source is limited to its own domain; an optional denylist
+  (`CRAWL_DENIED_HOSTS` / Settings) and deployment restriction (`CRAWL_RESTRICT_HOSTS`) apply;
 - respects `robots.txt`, rate-limits, and retries transient failures;
 - never attempts to bypass a login, CAPTCHA, or access control — a 401/403 is
   logged and skipped;

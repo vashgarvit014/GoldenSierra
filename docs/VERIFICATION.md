@@ -92,7 +92,7 @@ compiled. Checks performed with `curl`:
 - Wrong password → `401`; unknown email → `401` **with the same message**, so
   the endpoint cannot be used to enumerate accounts
 - Adding a source on an unauthorized host → rejected: *"That host is not
-  authorized for crawling. Add it to CRAWL_ALLOWED_HOSTS and redeploy first."*
+  authorized for crawling…" — superseded: any public https site is accepted; private/internal addresses are refused with an explanation."*
 - Writing a secret through the config endpoint → rejected: *"LLM_API_KEY is
   not a tunable setting"*
 - Out-of-range config value → rejected with the bound that was violated

@@ -92,7 +92,9 @@ EMBEDDING_MODEL=text-embedding-3-small
 EMBEDDING_DIMENSIONS=1536
 
 APP_URL=https://your-app.vercel.app
-CRAWL_ALLOWED_HOSTS=goldensierra.com,www.goldensierra.com
+# any public https site can be added from the admin UI; optionally restrict/deny:
+CRAWL_RESTRICT_HOSTS=
+CRAWL_DENIED_HOSTS=
 ```
 
 > **Changing the embedding model requires a full re-index.** The current index
