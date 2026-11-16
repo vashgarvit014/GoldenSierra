@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.goldensierra.worker</string>
+
+  <!-- npm resolves differently under launchd than in a login shell, so the
+       binary is named outright. __NODE__ and __DIR__ are substituted by
+       deploy/install-worker.sh at install time. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__DIR__/node_modules/.bin/tsx</string>
+    <string>__DIR__/scripts/worker.ts</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__DIR__</string>
+
+  <!-- Start at login and restart on crash. The worker exits 0 when another
+       instance holds the lease, and KeepAlive would respawn it in a loop, so
+       restart only on a non-zero exit. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>__DIR__/logs/worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>__DIR__/logs/worker.error.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

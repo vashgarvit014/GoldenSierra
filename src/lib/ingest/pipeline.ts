@@ -560,9 +560,36 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
   }
 }
 
+/** A job running longer than this is presumed dead and may be reclaimed. */
+const STALE_RUN_MS = 30 * 60 * 1000;
+
 export async function runJob(jobId: string): Promise<void> {
   const job = await prisma.ingestionJob.findUnique({ where: { id: jobId } });
   if (!job) throw new Error(`Job ${jobId} not found`);
+
+  // Claim the job before doing any work. Two workers, a stalled-job
+  // redelivery, or a retry can all deliver the same id more than once; the
+  // row is the authority on who owns it. Retrying a failure is legitimate,
+  // and so is reclaiming a run whose worker died, but a job already in
+  // flight must not be processed twice.
+  const stale = new Date(Date.now() - STALE_RUN_MS);
+  const claimed = await prisma.ingestionJob.updateMany({
+    where: {
+      id: jobId,
+      OR: [
+        { status: { in: [JobStatus.QUEUED, JobStatus.FAILED] } },
+        { status: JobStatus.RUNNING, startedAt: { lt: stale } },
+      ],
+    },
+    data: { status: JobStatus.RUNNING, startedAt: new Date() },
+  });
+  if (claimed.count === 0) {
+    logger.warn('Ingestion job already claimed; skipping duplicate delivery', {
+      jobId,
+      status: job.status,
+    });
+    return;
+  }
 
   switch (job.type) {
     case JobType.CRAWL:
