@@ -3,7 +3,7 @@ import { AdminRole } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { withErrorHandling } from '@/lib/errors';
 import { requireAdmin } from '@/lib/auth';
-import { auditIndex } from '@/lib/ingest/pipeline';
+import { auditIndex, failInterruptedUploads } from '@/lib/ingest/pipeline';
 import { collectionStats } from '@/lib/vector/qdrant';
 import { queueHealth } from '@/lib/ingest/queue';
 
@@ -23,6 +23,9 @@ export const GET = withErrorHandling(async (request: Request) => {
     if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     return NextResponse.json({ job: serializeJob(job) });
   }
+
+  // Idempotent housekeeping: an upload whose request died would otherwise show RUNNING forever.
+  await failInterruptedUploads().catch(() => 0);
 
   const [jobs, vector, index, queue] = await Promise.all([
     prisma.ingestionJob.findMany({

@@ -1,6 +1,7 @@
 import { env, hasRedis } from '../env';
 import { logger } from '../logger';
 import { runJob } from './pipeline';
+import { describeError } from './safety';
 
 /**
  * Background job dispatch.
@@ -90,7 +91,7 @@ export async function enqueueJob(jobId: string): Promise<{ mode: 'queued' | 'inl
     .catch((err) =>
       logger.error('Inline ingestion job failed', {
         jobId,
-        error: err instanceof Error ? err.message : String(err),
+        error: describeError(err),
       }),
     )
     .finally(() => running.delete(jobId));

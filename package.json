@@ -21,6 +21,7 @@
     "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "setup": "tsx scripts/setup-check.ts",
     "reclassify": "tsx scripts/reclassify.ts"
   },

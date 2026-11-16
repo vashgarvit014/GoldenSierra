@@ -12,8 +12,9 @@ import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { env, hasRedis } from '../src/lib/env';
 import { QUEUE_NAME } from '../src/lib/ingest/queue';
-import { runJob } from '../src/lib/ingest/pipeline';
+import { failInterruptedUploads, runJob } from '../src/lib/ingest/pipeline';
 import { logger } from '../src/lib/logger';
+import { failureContext, processDelivery } from '../src/lib/ingest/delivery';
 
 if (!hasRedis()) {
   console.error('REDIS_URL is not set. Jobs run in-process; this worker is not needed.');
@@ -52,11 +53,16 @@ async function main(): Promise<void> {
       .catch((err: Error) => logger.warn('Could not renew worker lock', { error: err.message }));
   }, LOCK_TTL_MS / 3);
 
+  // Uploads that died mid-request are never queued, so only a sweep can close them.
+  const sweep = () => void failInterruptedUploads().catch((err) => logger.warn('Upload sweep failed', failureContext(undefined, err)));
+  sweep();
+  const sweeper = setInterval(sweep, 5 * 60_000);
+
   const worker = new Worker<{ jobId: string }>(
     QUEUE_NAME,
-    async (job) => {
+    async (job, token) => {
       logger.info('Worker picked up job', { jobId: job.data.jobId, attempt: job.attemptsMade + 1 });
-      await runJob(job.data.jobId);
+      await processDelivery(job, token, runJob);
     },
     {
       connection: { url: env.REDIS_URL! },
@@ -73,9 +79,9 @@ async function main(): Promise<void> {
 
   worker.on('completed', (job) => logger.info('Job completed', { jobId: job.data.jobId }));
   worker.on('failed', (job, err) =>
-    logger.error('Job failed', { jobId: job?.data.jobId, error: err.message }),
+    logger.error('Job failed', { ...failureContext(job?.data.jobId, err), attemptsMade: job?.attemptsMade }),
   );
-  worker.on('error', (err) => logger.error('Worker error', { error: err.message }));
+  worker.on('error', (err) => logger.error('Worker error', failureContext(undefined, err)));
 
   console.log(`Worker listening on queue "${QUEUE_NAME}" as ${lockId}…`);
 
@@ -83,6 +89,7 @@ async function main(): Promise<void> {
     process.on(signal, () => {
       console.log(`\n${signal} received, finishing current job…`);
       clearInterval(renew);
+      clearInterval(sweeper);
       void worker
         .close()
         // Release only a lease we still own — a lapsed one may be someone else's.

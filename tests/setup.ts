@@ -12,3 +12,5 @@ process.env.AUTH_SECRET ??= 'test-secret-that-is-at-least-32-characters-long';
 process.env.QDRANT_URL ??= 'http://localhost:6333';
 // NODE_ENV is typed read-only by @types/node; assign through the record.
 (process.env as Record<string, string>).NODE_ENV = 'test';
+// Loopback fixtures are legitimate in tests; the SSRF guard is exercised explicitly.
+process.env.ALLOW_PRIVATE_FETCH = '1';

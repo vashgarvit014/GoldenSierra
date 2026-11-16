@@ -6,6 +6,7 @@ import { badRequest, notFound, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
 import { createJob } from '@/lib/ingest/pipeline';
 import { enqueueJob } from '@/lib/ingest/queue';
+import { InvalidPdfUrlError, validatePdfUrl } from '@/lib/ingest/safety';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export const maxDuration = 60;
 const BodySchema = z.object({
   type: z.enum(['CRAWL', 'REINDEX', 'PDF_INGEST', 'FULL_REBUILD']),
   sourceId: z.string().min(1).optional(),
-  url: z.string().url().max(2000).optional(),
+  url: z.string().max(2000).optional(),
   documentIds: z.array(z.string().min(1)).max(500).optional(),
 });
 
@@ -50,12 +51,18 @@ export const POST = withErrorHandling(async (request: Request) => {
     }
   }
 
-  if (body.type === 'PDF_INGEST' && !body.url) {
-    throw badRequest('A url is required to ingest a PDF');
+  let pdfUrl: string | undefined;
+  if (body.type === 'PDF_INGEST') {
+    try {
+      pdfUrl = validatePdfUrl(body.url);
+    } catch (err) {
+      if (err instanceof InvalidPdfUrlError) throw badRequest(err.message);
+      throw err;
+    }
   }
 
   const jobId = await createJob(body.type as JobType, body.sourceId ?? null, {
-    url: body.url,
+    url: pdfUrl ?? body.url,
     documentIds: body.documentIds,
   });
 

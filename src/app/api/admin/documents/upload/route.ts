@@ -3,7 +3,8 @@ import { AdminRole } from '@prisma/client';
 import { env } from '@/lib/env';
 import { badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
-import { ingestPdfUpload } from '@/lib/ingest/pipeline';
+import { ingestPdfUploadTracked } from '@/lib/ingest/pipeline';
+import { InvalidPdfUrlError, describeError, validatePdfUrl } from '@/lib/ingest/safety';
 import { logger } from '@/lib/logger';
 
 export const runtime = 'nodejs';
@@ -53,12 +54,25 @@ export const POST = withErrorHandling(async (request: Request) => {
   const readList = (key: string) =>
     readString(key)?.split(',').map((s) => s.trim()).filter(Boolean);
 
+  // An optional public url for the file must itself be a real http(s) address;
+  // otherwise the document is stored under its internal upload:// identifier.
+  let publicUrl: string | null = null;
+  const suppliedUrl = readString('url');
+  if (suppliedUrl) {
+    try {
+      publicUrl = validatePdfUrl(suppliedUrl);
+    } catch (err) {
+      if (err instanceof InvalidPdfUrlError) throw badRequest(err.message);
+      throw err;
+    }
+  }
+
   const buffer = await file.arrayBuffer();
 
   try {
-    const result = await ingestPdfUpload(buffer, filename, {
+    const result = await ingestPdfUploadTracked(buffer, filename, {
       sourceId: readString('sourceId') ?? null,
-      url: readString('url') ?? null,
+      url: publicUrl,
       overrides: {
         category: readString('category'),
         audience: readString('audience'),
@@ -78,6 +92,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     return NextResponse.json(
       {
         documentId: result.documentId,
+        jobId: result.jobId,
         action: result.action,
         chunksIndexed: result.chunks,
         reason: result.reason,
@@ -85,7 +100,7 @@ export const POST = withErrorHandling(async (request: Request) => {
       { status: 201 },
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     logger.warn('PDF upload failed', { filename, error: message });
     // Extraction failures are the uploader's problem to fix, so report them.
     throw badRequest(`Could not process this PDF: ${message}`);

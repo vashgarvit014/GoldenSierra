@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { DocumentStatus, DocumentType, JobStatus, JobType, type Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logger } from '../logger';
@@ -5,6 +6,9 @@ import { env } from '../env';
 import { embedTexts } from '../ai/embeddings';
 import {
   deleteByDocument,
+  deleteByChunkIds,
+  deleteStaleVectors,
+  collectionStats,
   ensureCollection,
   pointIdForChunk,
   upsertPoints,
@@ -27,6 +31,13 @@ import {
 import { crawl, normalizeUrl, type CrawlTarget } from './crawler';
 import { fetchAndExtractPdf, extractPdfFromBuffer } from './pdf';
 import type { ExtractedPage } from './extract';
+import {
+  STALE_RUN_MS,
+  JobInFlightError,
+  decideClaim,
+  describeError,
+  validatePdfUrl,
+} from './safety';
 
 /**
  * The ingestion pipeline:
@@ -197,8 +208,20 @@ export async function upsertDocument(input: DocumentInput): Promise<UpsertOutcom
 // ──────────────────────────── Indexing ────────────────────────────
 
 /**
- * Chunks, embeds and indexes one document. Old vectors and chunk rows are
- * removed first so a re-index can never leave stale text retrievable.
+ * Chunks, embeds and indexes one document — crash-safe.
+ *
+ * The live index is only touched once everything that replaces it exists:
+ *
+ *   1. chunk, then embed        (nothing mutated; a failure here changes nothing)
+ *   2. upsert the NEW points    (fresh ids, so the old ones keep serving)
+ *   3. one Postgres transaction (drop old chunk rows, insert new, mark INDEXED)
+ *   4. delete every other vector of this document
+ *
+ * A crash before 3 leaves the old chunks and vectors fully intact (plus some
+ * unreferenced new points, removed best-effort below and by step 4 of the next
+ * run). A crash between 3 and 4 leaves the new content live and some stale
+ * points that the next run — or `auditIndex` — reveals and step 4 removes.
+ * At no point is the document unsearchable.
  */
 export async function indexDocument(documentId: string): Promise<{ chunks: number }> {
   const document = await prisma.document.findUnique({ where: { id: documentId } });
@@ -214,6 +237,8 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
 
   const chunks = await chunkDocument(document.content, { documentTitle: document.title });
   if (chunks.length === 0) {
+    // Existing chunks and vectors are left alone: a failed re-chunk must not
+    // take down what is already searchable.
     await prisma.document.update({
       where: { id: documentId },
       data: { status: DocumentStatus.FAILED, failureReason: 'Chunking produced no content' },
@@ -221,33 +246,17 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
     return { chunks: 0 };
   }
 
-  // Clear first: deleting vectors before writing new ones means a crash
-  // mid-index leaves the document unsearchable rather than half-stale.
-  await deleteByDocument(documentId);
-  await prisma.documentChunk.deleteMany({ where: { documentId } });
-
-  const created = await prisma.$transaction(
-    chunks.map((chunk) =>
-      prisma.documentChunk.create({
-        data: {
-          documentId,
-          ordinal: chunk.ordinal,
-          content: chunk.content,
-          headingPath: chunk.headingPath,
-          tokenCount: chunk.tokenCount,
-          contentHash: chunk.contentHash,
-        },
-      }),
-    ),
-  );
-
-  const vectors = await embedTexts(created.map((c) => c.content));
-
-  const points: UpsertPoint[] = created.map((chunk, i) => {
+  // 1. Embed everything before changing anything.
+  const vectors = await embedTexts(chunks.map((c) => c.content));
+  const rows = chunks.map((chunk, i) => {
     const vector = vectors[i];
-    if (!vector) throw new Error(`Missing embedding for chunk ${chunk.id}`);
+    if (!vector) throw new Error(`Missing embedding for chunk ${chunk.ordinal} of ${documentId}`);
+    return { chunk, vector, id: randomUUID() };
+  });
+
+  const points: UpsertPoint[] = rows.map(({ chunk, vector, id }) => {
     const payload: VectorPayload = {
-      chunkId: chunk.id,
+      chunkId: id,
       documentId: document.id,
       title: document.title,
       url: document.url,
@@ -274,30 +283,67 @@ export async function indexDocument(documentId: string): Promise<{ chunks: numbe
       version: document.version,
       ordinal: chunk.ordinal,
     };
-    return { id: pointIdForChunk(chunk.id), vector, payload };
+    return { id: pointIdForChunk(id), vector, payload };
   });
+  const newChunkIds = rows.map((r) => r.id);
 
-  await upsertPoints(points);
+  // 2. Add the replacement points alongside the old ones.
+  try {
+    await upsertPoints(points);
+  } catch (err) {
+    await deleteByChunkIds(newChunkIds).catch(() => undefined); // partial batch
+    throw err;
+  }
 
+  // 3. Swap the Postgres side atomically.
   const now = new Date();
-  await prisma.$transaction([
-    ...created.map((chunk) =>
-      prisma.documentChunk.update({
-        where: { id: chunk.id },
-        data: {
-          vectorId: pointIdForChunk(chunk.id),
+  try {
+    await prisma.$transaction([
+      prisma.documentChunk.deleteMany({ where: { documentId } }),
+      prisma.documentChunk.createMany({
+        data: rows.map(({ chunk, id }) => ({
+          id,
+          documentId,
+          ordinal: chunk.ordinal,
+          content: chunk.content,
+          headingPath: chunk.headingPath,
+          tokenCount: chunk.tokenCount,
+          contentHash: chunk.contentHash,
+          vectorId: pointIdForChunk(id),
           embeddedAt: now,
           embeddingModel: env.EMBEDDING_MODEL,
-        },
+        })),
       }),
-    ),
-    prisma.document.update({
-      where: { id: documentId },
-      data: { status: DocumentStatus.INDEXED, failureReason: null },
-    }),
-  ]);
+      prisma.document.update({
+        where: { id: documentId },
+        data: { status: DocumentStatus.INDEXED, failureReason: null },
+      }),
+    ]);
+  } catch (err) {
+    // The old chunk rows survived (the transaction rolled back), so the old
+    // vectors are still the live ones. Drop the unreferenced new points.
+    await deleteByChunkIds(newChunkIds).catch((cleanupErr) =>
+      logger.warn('Could not remove unreferenced vectors after a failed swap', {
+        documentId,
+        error: describeError(cleanupErr),
+      }),
+    );
+    throw err;
+  }
 
-  return { chunks: created.length };
+  // 4. The new content is live; retire everything else this document has in
+  //    the index. If this fails the document is still correct — only stale
+  //    duplicates remain — so it is reported, not thrown.
+  try {
+    await deleteStaleVectors(documentId, newChunkIds);
+  } catch (err) {
+    logger.warn('Stale vectors remain after a successful swap; the next re-index will clear them', {
+      documentId,
+      error: describeError(err),
+    });
+  }
+
+  return { chunks: rows.length };
 }
 
 /** Archives a document and purges it from the vector index. */
@@ -324,6 +370,11 @@ export async function createJob(
   sourceId?: string | null,
   params?: Record<string, unknown>,
 ): Promise<string> {
+  // Reject at the door: a job that can never succeed only wastes a retry cycle
+  // and leaves a FAILED row behind.
+  if (type === JobType.PDF_INGEST) {
+    params = { ...params, url: validatePdfUrl(params?.url) };
+  }
   const job = await prisma.ingestionJob.create({
     data: { type, sourceId: sourceId ?? null, params: (params ?? {}) as Prisma.InputJsonValue },
   });
@@ -402,7 +453,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
             indexQueue.push(outcome.documentId);
           }
         } catch (err) {
-          tracker.log('error', err instanceof Error ? err.message : String(err), result.page.url);
+          tracker.log('error', describeError(err, 500), result.page.url);
         }
 
         await tracker.flush();
@@ -419,11 +470,11 @@ export async function runCrawlJob(jobId: string): Promise<void> {
         const { chunks } = await indexDocument(documentId);
         tracker.counters.chunksIndexed += chunks;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = describeError(err, 500);
         tracker.log('error', `Indexing failed: ${message}`);
         await prisma.document.update({
           where: { id: documentId },
-          data: { status: DocumentStatus.FAILED, failureReason: message.slice(0, 500) },
+          data: { status: DocumentStatus.FAILED, failureReason: message },
         }).catch(() => undefined);
       }
       await tracker.flush();
@@ -438,7 +489,7 @@ export async function runCrawlJob(jobId: string): Promise<void> {
         else if (outcome.action === 'updated') tracker.counters.documentsUpdated++;
         else tracker.counters.documentsSkipped++;
       } catch (err) {
-        tracker.log('warn', `PDF skipped: ${err instanceof Error ? err.message : String(err)}`, pdfUrl);
+        tracker.log('warn', `PDF skipped: ${describeError(err, 500)}`, pdfUrl);
       }
       await tracker.flush();
     }
@@ -459,13 +510,98 @@ export async function runCrawlJob(jobId: string): Promise<void> {
 
     log.info('Crawl job finished', tracker.counters as unknown as Record<string, unknown>);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     tracker.log('error', message);
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
       data: { status: JobStatus.FAILED, error: message.slice(0, 2000), finishedAt: new Date() },
     });
+    throw err;
+  }
+}
+
+function outcomeCounters(outcome: UpsertOutcome, chunks = 0) {
+  return {
+    documentsCreated: outcome.action === 'created' ? 1 : 0,
+    documentsUpdated: outcome.action === 'updated' ? 1 : 0,
+    documentsSkipped: outcome.action === 'unchanged' || outcome.action === 'skipped' ? 1 : 0,
+    chunksIndexed: chunks,
+  };
+}
+
+/**
+ * Fails upload jobs whose request died mid-flight.
+ *
+ * An upload job is RUNNING from the moment it is created and is never queued,
+ * so nothing would ever pick it up again. Any such row older than `olderThanMs`
+ * belongs to a request that crashed or timed out. Marking it FAILED (rather
+ * than retrying) is correct: the bytes were never stored, so the file must be
+ * uploaded again.
+ */
+export async function failInterruptedUploads(olderThanMs = STALE_RUN_MS): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const { count } = await prisma.ingestionJob.updateMany({
+    where: {
+      type: JobType.PDF_INGEST,
+      status: JobStatus.RUNNING,
+      startedAt: { lt: cutoff },
+      params: { path: ['upload'], equals: true },
+    },
+    data: {
+      status: JobStatus.FAILED,
+      finishedAt: new Date(),
+      errorCount: 1,
+      error: 'Upload interrupted before it finished (the server stopped mid-request). Upload the file again.',
+    },
+  });
+  if (count > 0) logger.warn('Marked interrupted upload jobs as failed', { count });
+  return count;
+}
+
+/**
+ * An uploaded PDF as a tracked job.
+ *
+ * The bytes exist only in this request, so the job is created already RUNNING
+ * and is never put on the queue — a worker cannot pick it up, and the file is
+ * ingested exactly once. The row gives uploads the same history, counters and
+ * error text as every other ingestion.
+ */
+export async function ingestPdfUploadTracked(
+  buffer: ArrayBuffer,
+  filename: string,
+  opts: Parameters<typeof ingestPdfUpload>[2] & { requestedBy?: string } = {},
+): Promise<UpsertOutcome & { chunks: number; jobId: string }> {
+  const job = await prisma.ingestionJob.create({
+    data: {
+      type: JobType.PDF_INGEST,
+      sourceId: opts.sourceId ?? null,
+      status: JobStatus.RUNNING,
+      startedAt: new Date(),
+      params: { upload: true, filename, bytes: buffer.byteLength } as Prisma.InputJsonValue,
+    },
+  });
+  try {
+    const result = await ingestPdfUpload(buffer, filename, opts);
+    await prisma.ingestionJob.update({
+      where: { id: job.id },
+      data: {
+        status: JobStatus.COMPLETED,
+        finishedAt: new Date(),
+        pagesDiscovered: 1,
+        pagesProcessed: 1,
+        ...outcomeCounters(result, result.chunks),
+      },
+    });
+    return { ...result, jobId: job.id };
+  } catch (err) {
+    const message = describeError(err);
+    await prisma.ingestionJob
+      .update({
+        where: { id: job.id },
+        data: { status: JobStatus.FAILED, error: message.slice(0, 2000), finishedAt: new Date(), errorCount: 1 },
+      })
+      .catch(() => undefined);
     throw err;
   }
 }
@@ -535,7 +671,7 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
         tracker.counters.chunksIndexed += chunks;
         tracker.counters.documentsUpdated++;
       } catch (err) {
-        tracker.log('error', `${document.title}: ${err instanceof Error ? err.message : String(err)}`);
+        tracker.log('error', `${document.title}: ${describeError(err, 500)}`);
       }
       tracker.counters.pagesProcessed++;
       await tracker.flush();
@@ -550,7 +686,8 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
+    tracker.log('error', message);
     await tracker.flush(true);
     await prisma.ingestionJob.update({
       where: { id: jobId },
@@ -560,18 +697,30 @@ export async function runReindexJob(jobId: string, documentIds?: string[]): Prom
   }
 }
 
-/** A job running longer than this is presumed dead and may be reclaimed. */
-const STALE_RUN_MS = 30 * 60 * 1000;
-
 export async function runJob(jobId: string): Promise<void> {
   const job = await prisma.ingestionJob.findUnique({ where: { id: jobId } });
   if (!job) throw new Error(`Job ${jobId} not found`);
 
   // Claim the job before doing any work. Two workers, a stalled-job
   // redelivery, or a retry can all deliver the same id more than once; the
-  // row is the authority on who owns it. Retrying a failure is legitimate,
-  // and so is reclaiming a run whose worker died, but a job already in
-  // flight must not be processed twice.
+  // row is the authority on who owns it.
+  const decision = decideClaim(job);
+  if (decision.kind === 'terminal') {
+    logger.info('Ingestion job already finished; acknowledging duplicate delivery', {
+      jobId,
+      status: decision.status,
+    });
+    return;
+  }
+  if (decision.kind === 'in_flight') {
+    // Never acknowledge this as success: the queue would drop the job while
+    // the row stays RUNNING and nothing would ever resume it.
+    logger.warn('Ingestion job is owned by a live run; deferring', { jobId });
+    throw new JobInFlightError(jobId, decision.retryAfterMs);
+  }
+
+  // The state can change between the read above and this write, so the claim
+  // itself is a compare-and-set; only one concurrent caller can win it.
   const stale = new Date(Date.now() - STALE_RUN_MS);
   const claimed = await prisma.ingestionJob.updateMany({
     where: {
@@ -581,13 +730,13 @@ export async function runJob(jobId: string): Promise<void> {
         { status: JobStatus.RUNNING, startedAt: { lt: stale } },
       ],
     },
-    data: { status: JobStatus.RUNNING, startedAt: new Date() },
+    data: { status: JobStatus.RUNNING, startedAt: new Date(), error: null, finishedAt: null },
   });
   if (claimed.count === 0) {
-    logger.warn('Ingestion job already claimed; skipping duplicate delivery', {
-      jobId,
-      status: job.status,
-    });
+    const current = await prisma.ingestionJob.findUnique({ where: { id: jobId } });
+    const again = current ? decideClaim(current) : ({ kind: 'terminal', status: 'MISSING' } as const);
+    if (again.kind === 'in_flight') throw new JobInFlightError(jobId, again.retryAfterMs);
+    logger.info('Ingestion job was claimed or finished by another delivery', { jobId });
     return;
   }
 
@@ -607,11 +756,12 @@ export async function runJob(jobId: string): Promise<void> {
       try {
         if (job.type === JobType.PDF_INGEST) {
           const params = (job.params ?? {}) as { url?: string };
-          if (!params.url) throw new Error('PDF_INGEST job requires a url parameter');
-          await ingestPdfFromUrl(params.url, job.sourceId);
+          // Rows created before validation existed (or by hand) get the same check.
+          const url = validatePdfUrl(params.url);
+          const outcome = await ingestPdfFromUrl(url, job.sourceId);
           await prisma.ingestionJob.update({
             where: { id: jobId },
-            data: { status: JobStatus.COMPLETED, finishedAt: new Date(), documentsCreated: 1 },
+            data: { status: JobStatus.COMPLETED, finishedAt: new Date(), ...outcomeCounters(outcome) },
           });
         } else {
           const params = (job.params ?? {}) as { documentId?: string };
@@ -623,12 +773,13 @@ export async function runJob(jobId: string): Promise<void> {
           });
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = describeError(err);
+        logger.error('Ingestion job failed', { jobId, type: job.type, error: message });
         await prisma.ingestionJob.update({
           where: { id: jobId },
           data: { status: JobStatus.FAILED, error: message.slice(0, 2000), finishedAt: new Date() },
         });
-        throw err;
+        throw err; // the worker decides retry vs. give up (see isPermanentJobError)
       }
       return;
     default:
@@ -646,16 +797,24 @@ export async function auditIndex(): Promise<{
   chunksInDb: number;
   chunksWithVectors: number;
   missingVectors: number;
+  /** Points in Qdrant; null when the vector store cannot be reached. */
+  vectorsInQdrant: number | null;
+  /** Qdrant points with no matching chunk row (stale or orphaned). */
+  orphanVectors: number | null;
 }> {
-  const [indexedDocuments, chunksInDb, chunksWithVectors] = await Promise.all([
+  const [indexedDocuments, chunksInDb, chunksWithVectors, stats] = await Promise.all([
     prisma.document.count({ where: { status: DocumentStatus.INDEXED } }),
     prisma.documentChunk.count(),
     prisma.documentChunk.count({ where: { vectorId: { not: null } } }),
+    collectionStats(),
   ]);
+  const vectorsInQdrant = stats.exists ? stats.vectorCount : null;
   return {
     indexedDocuments,
     chunksInDb,
     chunksWithVectors,
     missingVectors: chunksInDb - chunksWithVectors,
+    vectorsInQdrant,
+    orphanVectors: vectorsInQdrant === null ? null : vectorsInQdrant - chunksWithVectors,
   };
 }

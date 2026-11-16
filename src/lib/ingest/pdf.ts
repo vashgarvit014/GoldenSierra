@@ -3,6 +3,7 @@ import { env } from '../env';
 import { normalizeText } from './extract';
 import { withTimeout } from '../errors';
 import { logger } from '../logger';
+import { assertPublicUrl, validatePdfUrl } from './safety';
 
 /**
  * PDF text extraction. `unpdf` wraps a serverless build of pdf.js, so this
@@ -73,11 +74,26 @@ export async function extractPdfFromBuffer(
 }
 
 export async function fetchAndExtractPdf(url: string): Promise<ExtractedPdf> {
-  const response = await withTimeout(
-    fetch(url, { headers: { 'User-Agent': env.CRAWL_USER_AGENT } }),
-    env.CRAWL_TIMEOUT_MS,
-    `fetch pdf ${url}`,
-  );
+  // Redirects are followed by hand so every hop is re-checked; otherwise a
+  // public URL could bounce the server to an internal address.
+  let target = validatePdfUrl(url);
+  let response: Response | undefined;
+  for (let hop = 0; hop <= 5; hop++) {
+    await assertPublicUrl(target);
+    response = await withTimeout(
+      fetch(target, { headers: { 'User-Agent': env.CRAWL_USER_AGENT }, redirect: 'manual' }),
+      env.CRAWL_TIMEOUT_MS,
+      `fetch pdf ${target}`,
+    );
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) {
+      target = validatePdfUrl(new URL(location, target).toString());
+      response = undefined;
+      continue;
+    }
+    break;
+  }
+  if (!response) throw new Error(`Too many redirects fetching ${url}`);
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
 
   const declared = Number(response.headers.get('content-length') ?? 0);

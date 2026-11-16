@@ -282,6 +282,26 @@ export async function deleteByDocument(documentId: string): Promise<void> {
   logger.info('Deleted vectors for document', { documentId });
 }
 
+/**
+ * Removes a document's vectors *except* the ones named. Used after a swap, so
+ * it also sweeps points orphaned by an earlier run that crashed between
+ * writing vectors and committing the matching chunk rows.
+ */
+export async function deleteStaleVectors(documentId: string, keepChunkIds: string[]): Promise<void> {
+  const qdrant = getQdrant();
+  await withRetry(
+    () =>
+      qdrant.delete(collection(), {
+        wait: true,
+        filter: {
+          must: [{ key: 'documentId', match: { value: documentId } }],
+          ...(keepChunkIds.length ? { must_not: [{ has_id: keepChunkIds.map(pointIdForChunk) }] } : {}),
+        } as never,
+      }),
+    { attempts: 3, baseMs: 500, label: 'qdrant.deleteStaleVectors' },
+  );
+}
+
 export async function deleteByChunkIds(chunkIds: string[]): Promise<void> {
   if (chunkIds.length === 0) return;
   const qdrant = getQdrant();
