@@ -33,14 +33,14 @@ import {
   SMALL_TALK_TEXT,
   THRESHOLDS,
   contentTerms,
-  isGuidanceRequest,
   isSmallTalk,
-  relevanceGate,
+  relevanceGate, namedUnknowns,
   outsideKnowledgeBase,
   profileTerms,
   validateChunks,
   verifyAnswer,
 } from './strict';
+import { isGuidanceRequest } from './routing';
 import { collectionStats } from '../vector/qdrant';
 import { rerank } from './rerank';
 import { matchPrograms, toRecommendations } from '../programs/matching';
@@ -155,9 +155,13 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
   // decides whether to search: every question is searched, including ones the
   // classifier calls off-topic, because the knowledge base can hold any subject.
   const mode: 'factual' | 'guidance' = isGuidanceRequest(input.message) ? 'guidance' : 'factual';
-  const query = analysis.rewrittenQuery || input.message;
+  // On a first message the user's own words are the query: the model's rewrite adds nothing there and
+  // drifts between runs (it likes to append the agency's name, which matches every page). It is only
+  // needed to resolve a follow-up ("how much does it pay?") from the conversation.
+  const query = history.length === 0 ? input.message : analysis.rewrittenQuery || input.message;
   const terms = contentTerms(query);
   const diagnostics = baseDiagnostics(analysis, mode, terms.map((t) => t.raw));
+  diagnostics.rewrittenQuery = query;
 
   const finish = (reason: string, answer: string, partial: Partial<PreparedTurn> = {}): PreparedTurn => {
     diagnostics.noAnswerReason = reason;
@@ -174,6 +178,7 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
   const genericLookup = mode === 'factual' && (analysis.intent === 'off_topic' || analysis.intent === 'general_info');
   const retrievalAnalysis: QueryAnalysis = {
     ...analysis,
+    rewrittenQuery: query,
     // Generic or unrecognised lookups search with the user's own words only: no intent
     // vocabulary, no category bias. A confidently recognised domain intent (contact,
     // eligibility, financial aid…) keeps its vocabulary expansion, which helps recall.
@@ -188,6 +193,7 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
     retrieval = await retrieve(retrievalAnalysis, profile, {
       sourceIds: input.sourceIds,
       expand: !genericLookup,
+      originalQuery: input.message,
     });
   } catch (err) {
     logger.error('Knowledge base search failed', { error: err instanceof Error ? err.message : String(err) });
@@ -213,12 +219,13 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
   for (const r of rejected) status.set(r.chunkId, { status: r.status, reason: r.reason });
 
   // 3. Relevance gate (deterministic), then the model's relevance judgement via reranking.
-  const gate = relevanceGate(terms, valid);
+  const termProfile = await profileTerms(terms);
+  const gate = relevanceGate(terms, valid, termProfile);
   for (const [chunkId, reason] of gate.below) status.set(chunkId, { status: 'below_relevance', reason });
 
   let relevant = gate.relevant;
-  const termProfile = await profileTerms(terms);
-  const unknown = outsideKnowledgeBase(termProfile) ? termProfile.unknown : [];
+  const named = namedUnknowns(input.message, termProfile.unknown);
+  const unknown = outsideKnowledgeBase(termProfile, named) ? termProfile.unknown : [];
   if (unknown.length && relevant.length) {
     // Most of what the question asks about appears nowhere in the knowledge base.
     for (const s of relevant) status.set(s.chunkId, { status: 'below_relevance', reason: `"${unknown.join('", "')}" does not appear anywhere in the knowledge base` });
@@ -238,8 +245,13 @@ export async function prepareTurn(input: GenerateInput): Promise<PreparedTurn> {
       // sometimes missing), so it only vetoes: a passage it explicitly scored
       // below the bar is dropped, an unscored one is not penalised, and if it
       // judged the evidence irrelevant across the board the answer is "not found".
+      // A passage that contains every one of the question's terms (and the question has a distinctive
+      // term) is not overridden by the score: the model's judgement varies run to run, and a veto on
+      // clear deterministic evidence is how "what is orbit" intermittently found nothing.
+      const strongEvidence = (s: RetrievedSource) =>
+        termProfile.distinctive.length > 0 && (gate.coverage.get(s.chunkId) ?? 0) >= 0.99 && (s.similarity ?? 0) >= 0.55;
       const judged = ranked.filter((s) => s.llmRelevance !== undefined);
-      const low = (s: RetrievedSource) => (s.llmRelevance ?? 10) < THRESHOLDS.minLlmRelevance;
+      const low = (s: RetrievedSource) => (s.llmRelevance ?? 10) < THRESHOLDS.minLlmRelevance && !strongEvidence(s);
       if (judged.length > 0 && judged.length >= ranked.length / 2 && judged.every(low)) {
         for (const s of ranked) status.set(s.chunkId, { status: 'below_relevance', reason: `relevance model scored every passage below ${THRESHOLDS.minLlmRelevance}/10` });
         ranked = [];
@@ -433,7 +445,22 @@ export async function completeTurn(
   message: string,
   started: number,
 ): Promise<{ answer: string; payload: AssistantPayload; grounding: GroundingReport }> {
-  const finalized = finalizeAnswer(raw, prepared);
+  let finalized = finalizeAnswer(raw, prepared);
+
+  // The model sometimes fuses a supported fact with an unsupported one in a single sentence, and the
+  // verifier then (correctly) removes the whole sentence — leaving nothing even though the sources do
+  // contain the answer. Ask once for a version with one fact per sentence, and verify that exactly as
+  // strictly as the first. A reply of NO_ANSWER, or anything still unsupported, stays a refusal.
+  if (finalized.noAnswer && prepared.diagnostics.noAnswerReason === 'no_supported_claims' && prepared.diagnostics.unsupportedSentences.length > 0 && hasLlm()) {
+    const retry = await repairAnswer(prepared, raw, prepared.diagnostics.unsupportedSentences);
+    if (retry) {
+      prepared.diagnostics.noAnswerReason = null;
+      const second = finalizeAnswer(retry, prepared);
+      prepared.diagnostics.repair = second.noAnswer ? 'failed' : 'recovered';
+      logger.info('Answer repair pass', { outcome: prepared.diagnostics.repair });
+      finalized = second;
+    }
+  }
   const answered = !finalized.noAnswer;
 
   // Follow-up suggestions only make sense for guidance; a lookup stays a lookup.
@@ -453,6 +480,30 @@ export async function completeTurn(
   return { answer: finalized.answer, payload, grounding: finalized.grounding };
 }
 
+const REPAIR_NOTE = (rejected: string[]) =>
+  `Some sentences of your answer were removed because the SOURCES do not state them:\n${rejected.slice(0, 4).map((r) => `- ${r.slice(0, 220)}`).join('\n')}\n\n` +
+  'Write the answer again. Use only what the SOURCES state explicitly, one fact per sentence, copying names, numbers and phone numbers exactly, and cite every sentence like [1]. Do not combine details from different places into one claim, and do not add anything that is not written in the SOURCES. If the SOURCES do not state the answer, reply with exactly: NO_ANSWER';
+
+/** One bounded retry. Returns null if the model is unreachable; the caller then keeps the refusal. */
+async function repairAnswer(prepared: PreparedTurn, raw: string, rejected: string[]): Promise<string | null> {
+  try {
+    const response = await withTimeout(
+      getLlmClient().chat.completions.create({
+        model: env.LLM_MODEL,
+        temperature: 0,
+        max_tokens: env.LLM_MAX_TOKENS,
+        messages: [...prepared.messages, { role: 'assistant', content: raw }, { role: 'user', content: REPAIR_NOTE(rejected) }],
+      }),
+      30_000,
+      'answer repair',
+    );
+    return response.choices[0]?.message?.content?.trim() || null;
+  } catch (err) {
+    logger.warn('Answer repair failed', { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
 /**
  * Verification, in a fixed order: soften eligibility overclaims, verify every
  * claim and rebuild citations from the supporting chunks, then run the
@@ -470,7 +521,7 @@ export function finalizeAnswer(raw: string, prepared: PreparedTurn) {
   }
 
   const softened = softenOverclaims(raw);
-  const verified = verifyAnswer(softened, prepared.usedSources);
+  const verified = verifyAnswer(softened, prepared.usedSources, { question: prepared.diagnostics.query });
   prepared.diagnostics.unsupportedSentences = verified.unsupported;
 
   if (verified.noAnswer) {

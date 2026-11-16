@@ -54,7 +54,11 @@ export function buildFilters(analysis: QueryAnalysis, profile: UserProfile, sour
 export async function retrieve(
   analysis: QueryAnalysis,
   profile: UserProfile,
-  options: { topK?: number; finalK?: number; sourceIds?: string[]; /** false = search with the user's own words only */ expand?: boolean } = {},
+  options: {
+    topK?: number; finalK?: number; sourceIds?: string[];
+    /** false = search with the user's own words only */ expand?: boolean;
+    /** The message exactly as typed. Searched alongside the model's rewrite, which can drift or drop words. */ originalQuery?: string;
+  } = {},
 ): Promise<RetrievalResult> {
   const started = Date.now();
   const topK = options.topK ?? env.RETRIEVAL_TOP_K;
@@ -62,7 +66,7 @@ export async function retrieve(
 
   // Multi-part questions get one retrieval per sub-question so a two-part ask
   // ("training AND how do I apply?") does not lose half its evidence.
-  const queries = buildQueries(analysis, profile, options.expand !== false);
+  const queries = buildQueries(analysis, profile, options.expand !== false, options.originalQuery);
 
   const vectorStart = Date.now();
   let vectorFailures = 0;
@@ -195,9 +199,10 @@ const INTENT_EXPANSIONS: Record<Intent, string> = {
   off_topic: '',
 };
 
-function buildQueries(analysis: QueryAnalysis, profile: UserProfile, expand = true): string[] {
+function buildQueries(analysis: QueryAnalysis, profile: UserProfile, expand = true, originalQuery?: string): string[] {
   const queries = new Set<string>();
   queries.add(analysis.rewrittenQuery);
+  if (originalQuery?.trim()) queries.add(originalQuery.trim());
 
   // Expansion query in the corpus's vocabulary, not the user's. Skipped for
   // direct lookups, where it would pull in unrelated, generic pages.

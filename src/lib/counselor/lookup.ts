@@ -1,5 +1,5 @@
 import { generateAnswer } from '../rag/generate';
-import { isGuidanceRequest, isSmallTalk, NO_ANSWER_TEXT } from '../rag/strict';
+import { NO_ANSWER_TEXT } from '../rag/strict';
 import { buildKnownFacts } from './matching';
 import type { CounselorContext, CounselorTurn } from '@/types/counselor';
 import type { ChatTurn } from '@/types/chat';
@@ -12,15 +12,7 @@ import type { ChatTurn } from '@/types/chat';
  * the next personal message.
  */
 
-const LOOKUP_START = /^\s*(what|who|when|where|which|why|how (much|many|long|old|does|do|is|are|can)|is|are|does|do|can|tell me (about|more)|explain|describe|define)\b/i;
-
-export function isFactualLookup(message: string): boolean {
-  if (isSmallTalk(message) || isGuidanceRequest(message)) return false;
-  // A question about the person ("what should I do", "what fits me") is guidance.
-  const withoutImperative = message.replace(/\btell me\b/gi, ' ');
-  if (/\b(i|me|my|we|our|us)\b/i.test(withoutImperative) && !/\b(what|who) is\b/i.test(message)) return false;
-  return LOOKUP_START.test(message) || /\?\s*$/.test(message);
-}
+export { isFactualLookup } from '../rag/routing';
 
 export async function lookupTurn(args: {
   message: string;

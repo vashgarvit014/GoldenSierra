@@ -27,7 +27,12 @@ export const THRESHOLDS = {
   /** Share of the question's distinctive terms a passage must contain to count as relevant on its own. */
   minLexicalCoverage: 0.5,
   /** A semantically close passage may pass with a little term overlap… */
-  semanticOverride: 0.62,
+  // Calibrated on the live index (scripts/calibrate-relevance.ts, 21 answerable / 18 unanswerable queries,
+  // and tests/e2e/strict-stability.ts repeat runs): with concept-aware, figure-free coverage the sweep is flat from
+  // 0.56 to 0.64 (identical recall, identical leakage), but repeat runs showed a supported paraphrase whose
+  // chunk scores 0.61 refusing intermittently at 0.62. 0.60 sits inside the flat region, with margin, and
+  // below it unrelated passages begin to appear.
+  semanticOverride: 0.6,
   /** …provided at least this much of the question's vocabulary is present… */
   semanticMinCoverage: 0.2,
   /** …and a very close one passes on meaning alone (conversational questions share few literal words with their answers). */
@@ -84,18 +89,63 @@ export function contentTerms(text: string): Term[] {
   return out;
 }
 
-/** Stems of a text, plus a 6-letter prefix key for longer stems so "automate"/"automation" still meet. */
+/**
+ * Words that mean the same thing for the purpose of "does this passage speak to the
+ * question". Deliberately small and conservative: true synonyms only, never merely
+ * related words (phone ≠ email, cost ≠ free). Used for relevance and paraphrase
+ * matching; figures, links and phone numbers are still compared verbatim.
+ */
+const CONCEPT_GROUPS: string[][] = [
+  ['contact', 'touch', 'reach'],
+  ['phone', 'telephone', 'call', 'dial'],
+  ['email', 'e-mail'],
+  ['eligible', 'eligibility', 'qualify', 'qualification', 'qualified', 'entitled'],
+  ['cost', 'price', 'fee', 'charge'],
+  ['free', 'no-cost', 'complimentary', 'gratis'],
+  ['hire', 'recruit', 'recruiting', 'recruitment'],
+  ['wage', 'salary', 'pay', 'earn', 'compensation'],
+  ['help', 'assist', 'assistance', 'support', 'aid'],
+  ['offer', 'provide'],
+  ['require', 'requirement', 'must', 'necessary', 'mandatory'],
+  ['begin', 'start', 'commence'],
+  ['end', 'finish', 'conclude', 'complete'],
+  ['address', 'location', 'located'],
+  ['job', 'employment', 'position', 'opening'],
+  ['course', 'class'],
+  ['internship', 'intern'],
+  ['apply', 'application', 'enroll', 'register', 'registration', 'sign-up'],
+  ['employer', 'business', 'company'],
+  ['veteran', 'veterans'],
+];
+const CONCEPT_OF = new Map<string, number>();
+CONCEPT_GROUPS.forEach((group, i) => group.forEach((w) => CONCEPT_OF.set(stem(w), i)));
+
+/** Stems of a text, plus a 6-letter prefix key for longer stems so "automate"/"automation" still meet, plus its concept keys. */
 export function stemSet(text: string): Set<string> {
   const set = new Set<string>();
-  for (const t of tokens(text)) {
-    const s = stem(t);
+  const add = (word: string) => {
+    const s = stem(word);
+    if (!s) return;
     set.add(s);
     if (s.length >= 7) set.add(`~${s.slice(0, 6)}`);
+    const c = CONCEPT_OF.get(s);
+    if (c !== undefined) set.add(`@${c}`);
+  };
+  for (const raw of text.match(/[A-Za-z0-9$]+(?:[.'-][A-Za-z0-9]+)*/g) ?? []) {
+    add(raw.toLowerCase());
+    // Scraped pages glue words together ("Office115", "7722Fax", "OurTeam"). Index the parts as well,
+    // in addition to the whole token, so a question's "office" still meets "Office115".
+    const parts = raw.split(/(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Za-z])|(?<=[A-Z])(?=[A-Z][a-z])/);
+    if (parts.length > 1) for (const part of parts) if (part.length >= 2) add(part.toLowerCase());
   }
   return set;
 }
 
-const has = (hay: Set<string>, stemmed: string) => hay.has(stemmed) || (stemmed.length >= 7 && hay.has(`~${stemmed.slice(0, 6)}`));
+const has = (hay: Set<string>, stemmed: string) => {
+  if (hay.has(stemmed) || (stemmed.length >= 7 && hay.has(`~${stemmed.slice(0, 6)}`))) return true;
+  const c = CONCEPT_OF.get(stemmed);
+  return c !== undefined && hay.has(`@${c}`);
+};
 
 /** Share of `terms` present in the haystack's stems. */
 export function lexicalCoverage(terms: Term[], haystack: Set<string>): number {
@@ -161,9 +211,24 @@ export async function profileTerms(terms: Term[]): Promise<TermProfile> {
   return out;
 }
 
+/**
+ * Unknown terms the user wrote as a proper noun ("minimum wage in Oregon", "CalFresh"): a named
+ * thing the knowledge base has never mentioned. The question is about it, so unrelated passages
+ * that merely share the generic words cannot answer it. Ignored for sentence-initial words and
+ * for questions written in Title Case.
+ */
+export function namedUnknowns(message: string, unknown: string[]): string[] {
+  const words = message.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  if (words.length === 0) return [];
+  const capitalised = words.filter((w) => /^[A-Z]/.test(w)).length;
+  if (words.length > 3 && capitalised / words.length > 0.5) return []; // Title Case / shouting
+  const wanted = new Set(unknown.map((u) => u.toLowerCase()));
+  return words.filter((w, i) => i > 0 && /^[A-Z]/.test(w) && wanted.has(w.toLowerCase()));
+}
+
 /** The question is mostly about things the knowledge base has never seen. */
-export function outsideKnowledgeBase(p: TermProfile): boolean {
-  return p.unknown.length > 0 && p.unknown.length >= p.distinctive.length;
+export function outsideKnowledgeBase(p: TermProfile, named: string[] = []): boolean {
+  return p.unknown.length > 0 && (named.length > 0 || p.unknown.length >= p.distinctive.length);
 }
 
 // ───────────────────────── PostgreSQL validation ─────────────────────────
@@ -252,15 +317,61 @@ export type GateResult = {
   below: Map<string, string>;
 };
 
-/** Cheap, deterministic first gate. The LLM relevance score is applied after reranking. */
-export function relevanceGate(terms: Term[], sources: RetrievedSource[]): GateResult {
+/**
+ * The terms that say what a question is *about*. Figures ("$40,000") are checked against the
+ * evidence at answer time, and ubiquitous words ("year", "training") match nearly every passage,
+ * so counting either against a passage's coverage only dilutes it and refuses answerable questions.
+ */
+export function topicalTerms(terms: Term[], profile?: TermProfile): Term[] {
+  const noFigures = terms.filter((t) => !/^\$?\d/.test(t.raw));
+  const generic = new Set(profile?.generic ?? []);
+  const topical = noFigures.filter((t) => !generic.has(t.raw));
+  return topical.length > 0 ? topical : noFigures.length > 0 ? noFigures : terms;
+}
+
+/** The page's own domain with the dots removed ("goldensierracom"): what a term naming the site can be matched against. */
+export function hostKey(url: string | null | undefined): string {
+  try {
+    return new URL(url ?? '').hostname.replace(/^www\./, '').replace(/\./g, '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Coverage of `terms` by a passage, where a term naming the passage's own site ("Golden Sierra" on
+ * goldensierra.com) also counts as covered. The site name only supplements real overlap: a passage
+ * that shares none of the question's words with it is not relevant because of its domain.
+ */
+function coverageWithSite(terms: Term[], hay: Set<string>, host: string): number {
+  if (terms.length === 0) return 0;
+  let content = 0;
+  let site = 0;
+  for (const t of terms) {
+    if (has(hay, t.stem)) content++;
+    else if (t.raw.length >= 5 && host.includes(t.raw)) site++;
+  }
+  return content === 0 ? 0 : (content + site) / terms.length;
+}
+
+/**
+ * Cheap, deterministic first gate. The LLM relevance score is applied after reranking.
+ *
+ * A passage's coverage is the better of two measures — every non-figure term, and the topical
+ * terms alone — so ignoring ubiquitous words can only ever admit more answerable passages,
+ * never fewer than counting them would.
+ */
+export function relevanceGate(terms: Term[], sources: RetrievedSource[], profile?: TermProfile): GateResult {
   const coverage = new Map<string, number>();
   const below = new Map<string, string>();
   const relevant: RetrievedSource[] = [];
+  const everyTerm = terms.filter((t) => !/^\$?\d/.test(t.raw));
+  const topical = topicalTerms(terms, profile);
 
   for (const s of sources) {
     const hay = stemSet(`${s.title} ${s.headingPath ?? ''} ${s.snippet}`);
-    const cov = lexicalCoverage(terms, hay);
+    const host = hostKey(s.url);
+    const cov = Math.max(coverageWithSite(everyTerm.length ? everyTerm : terms, hay, host), coverageWithSite(topical, hay, host));
     coverage.set(s.chunkId, cov);
     const sim = s.similarity ?? 0;
     const pass =
@@ -277,13 +388,6 @@ export function relevanceGate(terms: Term[], sources: RetrievedSource[]): GateRe
 
 const SMALL_TALK = /^\s*(hi|hello|hey|hiya|howdy|thanks|thank you|thx|good (morning|afternoon|evening)|bye|goodbye|ok|okay|cool|great)[\s!.?,]*$/i;
 export const isSmallTalk = (message: string) => SMALL_TALK.test(message);
-
-/** A first-person request for personal help is guidance; everything else is a lookup. */
-const GUIDANCE_CUES =
-  /\b(i am|i'm|im|i need|i want|i'd like|i would like|help me|can you help me|for me|my (situation|resume|business|company|team|career|job)|we need|we are|we're|looking for (a )?(job|work|training))\b/i;
-export function isGuidanceRequest(message: string): boolean {
-  return GUIDANCE_CUES.test(message);
-}
 
 // ───────────────────────── answer verification ─────────────────────────
 
@@ -319,11 +423,73 @@ export type Verification = {
   unsupported: string[];
 };
 
-const FIGURE = /\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s?%|\b\d[\d,]*\.\d+\b|\b\d{2,}(?:,\d{3})*\b/g;
-const digitsOf = (s: string) => s.replace(/[^\d.]/g, '');
+// ───────────────────────── figures ─────────────────────────
 
-function figuresIn(text: string): string[] {
-  return (text.match(FIGURE) ?? []).map(digitsOf).filter((d) => d && d !== '.');
+const UNITS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+
+/** "four" → 4, "twenty-five" → 25, "50 percent" → 50%, "1,000 dollars" → $1,000. "one" only counts on the evidence side (it is also a pronoun). */
+function normalizeNumbers(text: string, evidenceSide: boolean): string {
+  const tens = Object.keys(TENS).join('|');
+  const units = Object.keys(UNITS).filter((w) => UNITS[w]! < 10).join('|');
+  const small = Object.keys(UNITS).filter((w) => evidenceSide || w !== 'one').join('|');
+  return text
+    .replace(new RegExp(`\\b(${tens})[-\\s](${units})\\b`, 'gi'), (_, t: string, u: string) => String(TENS[t.toLowerCase()]! + UNITS[u.toLowerCase()]!))
+    .replace(new RegExp(`\\b(${tens})\\b`, 'gi'), (_, t: string) => String(TENS[t.toLowerCase()]))
+    .replace(new RegExp(`\\b(${small})\\b`, 'gi'), (_, w: string) => String(UNITS[w.toLowerCase()]))
+    .replace(/(\d)\s*(?:percent|per cent)\b/gi, '$1%')
+    .replace(/(\d[\d,]*(?:\.\d+)?)\s*(?:dollars?|usd)\b/gi, '$$$1');
+}
+
+// Boundaries only guard against neighbouring digits: scraped text is often glued ("California115 Ascot", "7722Fax").
+const FIGURE = /\$\s?\d[\d,]*(?:\.\d+)?|(?<!\d)\d[\d,]*(?:\.\d+)?\s?%|(?<![\d$])\d[\d,]*(?:\.\d+)?(?!\d)/g;
+
+/** Canonical numeric text, so 15.50 = 15.5 and 1,000 = 1000. */
+function canonNumber(raw: string): string {
+  const n = Number(raw.replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) ? String(n) : raw;
+}
+
+export type Qualifier = 'none' | 'cap' | 'floor' | 'approx';
+export type Figure = { key: string; plain: string; qualifier: Qualifier };
+
+const CAP = /\b(?:up to|as much as|as many as|maximum(?: of)?|max|no more than|at most|capped at)\s*$/i;
+const FLOOR = /\b(?:at least|minimum(?: of)?|min|starting at|starts at|as low as|no less than|more than|over)\s*$/i;
+const APPROX = /(?:\b(?:about|around|approximately|roughly|estimated|nearly|almost)|~)\s*$/i;
+
+/** Every figure in a text, with its unit, and whether the text qualifies it ("up to", "at least", "about"). */
+export function figuresIn(text: string, evidenceSide = false): Figure[] {
+  const t = normalizeNumbers(text.replace(/^\s*\d+[.)]\s+/, ''), evidenceSide);
+  const out: Figure[] = [];
+  for (const m of t.matchAll(FIGURE)) {
+    const raw = m[0];
+    const plain = canonNumber(raw);
+    if (!plain || plain === '.') continue;
+    const unit = raw.startsWith('$') ? '$' : raw.endsWith('%') ? '%' : '';
+    const before = t.slice(Math.max(0, m.index! - 24), m.index!);
+    const qualifier: Qualifier = CAP.test(before) ? 'cap' : FLOOR.test(before) ? 'floor' : APPROX.test(before) ? 'approx' : 'none';
+    out.push({ key: `${unit}${plain}`, plain, qualifier });
+  }
+  return out;
+}
+
+const EXACTNESS = /\b(?:exact|exactly|precisely|flat|fixed|guaranteed|always)\b/i;
+
+/**
+ * A claimed figure is supported when the evidence states the same figure (with the same
+ * unit), and the claim does not make it firmer than the source does: "$1,000" is not
+ * supported by "up to $1,000", and "up to" is not supported by "at least".
+ */
+export function figureSupported(claim: Figure, sentence: string, evidence: Figure[]): boolean {
+  const same = evidence.filter((e) => (claim.key.startsWith('$') || claim.key.endsWith('%') ? e.key === claim.key : e.plain === claim.plain));
+  if (same.length === 0) return false;
+  const quals = new Set(same.map((e) => e.qualifier));
+  if (claim.qualifier === 'none') return quals.has('none') && !(EXACTNESS.test(sentence) && !quals.has('none'));
+  if (claim.qualifier === 'approx') return true; // a hedge is never stronger than the source
+  return quals.has(claim.qualifier) || quals.has('none');
 }
 
 /** Splits on sentence ends, keeping a citation marker that follows the full stop ("... hour. [1]") with its own sentence. */
@@ -332,6 +498,32 @@ export function splitSentences(line: string): string[] {
     .split(/(?<=[.!?](?:\s*\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=[A-Z0-9"“(])/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+// ───────────────────────── gaps in the documents ─────────────────────────
+
+const GAP_VERB = '(?:state|specify|mention|list|define|provide|say|give|indicate|contain|include|describe|publish|address|identify|show|cover|have|set|note)';
+const GAP_SUBJECT = '(?:(?:the|these|those|our)\\s+)?(?:sources?|documents?|pages?|passages?|materials?|information|text|indexed\\s+\\w+|knowledge base|they)';
+const GAP_CLAUSE = new RegExp(
+  `(?:^|[,;:\u2014\u2013]\\s*|\\s+)(?:(?:but|however|yet|although|though|and|so|therefore)\\s*,?\\s+)?${GAP_SUBJECT}\\s+(?:(?:do(?:es)?|did)\\s+not|don['\u2019]t|doesn['\u2019]t|(?:contain|provide|give|have)\\s+no|never)\\s+(?:\\w+\\s+){0,2}?${GAP_VERB}\\b[^]*$`,
+  'i',
+);
+
+/**
+ * Splits "X is available only to A or B, but the sources do not specify an income threshold" into the
+ * claim ("X is available only to A or B") and the statement about the documents' silence. The claim is
+ * verified like any other; the silence note says nothing about the world and is kept only if it adds no
+ * new facts (see verifyAnswer).
+ */
+export function peelGap(sentence: string): { claim: string; gap: string | null } {
+  const m = GAP_CLAUSE.exec(sentence);
+  if (!m) return { claim: sentence, gap: null };
+  const connective = /^(?:but|however|yet|although|though|and|so|therefore)\s*,?\s+/i;
+  let claim = sentence.slice(0, m.index).replace(/[\s,;:\u2014\u2013]+$/, '').replace(/\s+(?:but|however|yet|although|though|and|so|therefore)$/i, '').trim();
+  let gap = sentence.slice(m.index).replace(/^[\s,;:\u2014\u2013]+/, '').replace(connective, '').trim();
+  gap = gap.charAt(0).toUpperCase() + gap.slice(1);
+  if (claim && !/[.!?]$/.test(claim)) claim += '.';
+  return { claim, gap };
 }
 
 /**
@@ -346,7 +538,7 @@ export function splitSentences(line: string): string[] {
  *    only ever point at a chunk retrieved for this response, and a wrong
  *    citation the model chose is corrected rather than trusted.
  */
-export function verifyAnswer(raw: string, used: RetrievedSource[]): Verification {
+export function verifyAnswer(raw: string, used: RetrievedSource[], context: { question?: string } = {}): Verification {
   const empty = (reason: string): Verification => ({
     noAnswer: true,
     reason,
@@ -363,14 +555,17 @@ export function verifyAnswer(raw: string, used: RetrievedSource[]): Verification
 
   const chunkText = used.map((s) => `${s.title} ${s.headingPath ?? ''} ${s.snippet}`);
   const chunkStems = chunkText.map(stemSet);
-  const evidenceFigures = new Set(figuresIn(chunkText.join(' ')));
+  const evidenceFigures = figuresIn(chunkText.join(' \n '), true);
+  const questionFigures = new Set(figuresIn(context.question ?? '').map((f) => f.plain));
   const evidencePhoneDigits = chunkText.join(' ').replace(/\D/g, '');
   const evidenceLower = chunkText.join('\n').toLowerCase();
   const unionStems = new Set(chunkStems.flatMap((s) => [...s]));
+  // "For Golden Sierra, call…" names the site the page came from. The page's own domain is evidence of that attribution.
+  const hosts = used.map((s) => hostKey(s.url)).filter(Boolean);
+  const isAttribution = (t: Term) => t.raw.length >= 5 && hosts.some((h) => h.includes(t.raw));
 
   const unsupported: string[] = [];
   const keptLines: { prefix: string; sentences: { text: string; chunkIdx: number[] }[] }[] = [];
-  let substantive = 0;
 
   for (const line of text.split('\n')) {
     if (!line.trim()) {
@@ -380,15 +575,37 @@ export function verifyAnswer(raw: string, used: RetrievedSource[]): Verification
     const prefix = line.match(/^\s*(?:[-*•]\s+|\d+[.)]\s+|#{1,6}\s+)?/)?.[0] ?? '';
     const body = line.slice(prefix.length);
     const kept: { text: string; chunkIdx: number[] }[] = [];
+    const isListItem = /^\s*(?:[-*•]|\d+[.)])\s+/.test(prefix);
+    let headRemoved = false;
+    let sentenceIndex = -1;
 
+    const units: { sentence: string; gap: boolean; cited: number[] }[] = [];
     for (const sentence of splitSentences(body)) {
-      const cited = [...sentence.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)]
+      const cited = [...sentence.matchAll(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*,?\s*\]/g)]
         .flatMap((m) => m[1]!.split(',').map((n) => Number(n.trim())))
         .filter((n) => n >= 1 && n <= used.length)
         .map((n) => n - 1);
-      const clean = sentence.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, '').replace(/\s+([.,;:!?])/g, '$1').trim();
+      const whole = sentence.replace(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*,?\s*\]/g, '').replace(/\s+([.,;:!?])/g, '$1').trim();
+      const { claim, gap } = peelGap(whole);
+      if (claim) units.push({ sentence: claim, gap: false, cited });
+      if (gap) units.push({ sentence: gap, gap: true, cited: [] });
+    }
+
+    for (const unit of units) {
+      sentenceIndex++;
+      const { cited } = unit;
+      const clean = unit.sentence;
+
+      // A statement about what the documents do not say asserts nothing about the world. It may repeat the
+      // user's own figures ("…whether $40,000 qualifies") but may not introduce any figure or link of its own.
+      if (unit.gap) {
+        const fresh = figuresIn(clean).filter((f) => !questionFigures.has(f.plain) && !figureSupported(f, clean, evidenceFigures));
+        if (fresh.length === 0 && !/https?:\/\/|@/.test(clean)) kept.push({ text: clean, chunkIdx: [] });
+        else unsupported.push(clean);
+        continue;
+      }
       const terms = contentTerms(clean);
-      const figs = figuresIn(clean.replace(/^\d+[.)]\s+/, ''));
+      const figs = figuresIn(clean);
       const emails = clean.match(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g) ?? [];
       const urls = clean.match(/https?:\/\/[^\s)<>\]]+/g) ?? [];
       const phones = clean.match(/\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g) ?? [];
@@ -400,35 +617,49 @@ export function verifyAnswer(raw: string, used: RetrievedSource[]): Verification
         continue;
       }
 
-      const figuresOk = figs.every((f) => evidenceFigures.has(f));
+      const figuresOk = figs.every((f) => figureSupported(f, clean, evidenceFigures));
       const linksOk =
         emails.every((e) => evidenceLower.includes(e.toLowerCase())) &&
         urls.every((u) => evidenceLower.includes(u.replace(/[.,;)]+$/, '').toLowerCase())) &&
         phones.every((p) => evidencePhoneDigits.includes(p.replace(/\D/g, '')));
 
-      const perChunk = chunkStems.map((hay) => lexicalCoverage(terms, hay));
-      const union = lexicalCoverage(terms, unionStems);
+      const content = terms.filter((t) => !isAttribution(t));
+      const scored = content.length > 0 ? content : terms;
+      const perChunk = chunkStems.map((hay) => lexicalCoverage(scored, hay));
+      const union = lexicalCoverage(scored, unionStems);
 
       // Supported only when the retrieved chunks *together* contain at least 75% of the claim's
       // distinctive terms (and every figure/link verbatim). A claim that is half evidence and half
       // the model's own addition fails. The sentence cites the fewest chunks that cover it.
       let cite: number[] | null = null;
       if (figuresOk && linksOk && union >= THRESHOLDS.minUnionSupport) {
-        cite = coverTerms(terms, chunkStems);
+        cite = coverTerms(scored, chunkStems);
         // Keep the model's own picks when they genuinely contribute to the claim.
         for (const i of new Set(cited)) if (!cite.includes(i) && perChunk[i]! >= 0.3 && cite.length < 3) cite.push(i);
       }
 
       if (!cite) {
         unsupported.push(clean);
+        if (isListItem && sentenceIndex === 0) headRemoved = true;
         continue;
       }
       kept.push({ text: clean, chunkIdx: cite });
-      substantive++;
     }
+    // A list item's first sentence names what the rest of the item is about; without it the remainder is an orphan.
+    if (headRemoved) continue;
     if (kept.length) keptLines.push({ prefix, sentences: kept });
   }
 
+  // A lead-in ("Two options fit:") with nothing after it to introduce is removed.
+  for (let i = keptLines.length - 1; i >= 0; i--) {
+    const line = keptLines[i]!;
+    const leadIn = line.sentences.length > 0 && line.sentences.every((x) => x.chunkIdx.length === 0) && /:\s*$/.test(line.sentences.at(-1)!.text);
+    if (!leadIn) continue;
+    const next = keptLines.slice(i + 1).find((l) => l.sentences.length > 0);
+    if (!next || !/^\s*(?:[-*•]|\d+[.)])\s+/.test(next.prefix)) keptLines.splice(i, 1);
+  }
+
+  const substantive = keptLines.reduce((n, l) => n + l.sentences.filter((x) => x.chunkIdx.length > 0).length, 0);
   if (substantive === 0) {
     const out = empty('no_supported_claims');
     out.unsupported = unsupported;

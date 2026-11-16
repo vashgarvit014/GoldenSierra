@@ -53,7 +53,7 @@ async function main() {
   for (const result of results) {
     const mark = result.passed ? '✓' : '✗';
     console.log(`${mark} ${result.name}`);
-    console.log(`    score ${(result.overall * 100).toFixed(0)}%  ·  ${result.latencyMs}ms`);
+    console.log(`    score ${(result.overall * 100).toFixed(0)}%  ·  ${result.latencyMs}ms${result.notApplicable.length ? `  ·  n/a: ${result.notApplicable.join(', ')}` : ''}`);
     if (result.failures.length) {
       for (const failure of result.failures) console.log(`    – ${failure}`);
     }

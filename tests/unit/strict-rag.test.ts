@@ -3,7 +3,6 @@ import {
   NO_ANSWER_TEXT,
   THRESHOLDS,
   contentTerms,
-  isGuidanceRequest,
   isSmallTalk,
   lexicalCoverage,
   splitSentences,
@@ -207,6 +206,7 @@ describe('answer verification', () => {
 });
 
 import { isFactualLookup } from '@/lib/counselor/lookup';
+import { isGuidanceRequest } from '@/lib/rag/routing';
 describe('public chat: lookups vs the counselor flow', () => {
   it.each(['what is orbit', 'What is Orbit?', 'How much does the apprenticeship pay?', 'who runs the program', 'Tell me about WIOA', 'Is Orbit a broker?', 'explain on-the-job training'])(
     'answers %s directly from the documents',

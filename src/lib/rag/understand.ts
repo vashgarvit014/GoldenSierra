@@ -55,6 +55,8 @@ const INTENT_RULES: { intent: Intent; pattern: RegExp; weight: number }[] = [
   { intent: 'internship', pattern: /\binternships?\b|\binterns?\b|\bwork experience\b|\bpaid experience\b/i, weight: 3 },
   { intent: 'financial_assistance', pattern: /\bscholarships?\b|\btuition\b|\bfinancial (aid|assistance|help)\b|\bpay for (school|training|classes|a course)\b|\bafford\b|\bgrants?\b|\bmoney for\b|\bcover the cost\b/i, weight: 4 },
   { intent: 'find_training', pattern: /\btrainings?\b|\blearn a (new )?skill\b|\bcertifications?\b|\bcredentials?\b|\bcourses?\b|\bclasses\b|\bschool\b|\bupskill\b|\bretrain\b|\bapprentice(ship)?s?\b/i, weight: 2 },
+  // A direct eligibility question about a program is about eligibility, whatever the program is.
+  { intent: 'eligibility', pattern: /\b(?:do|can|could|would|will|am|are|does) (?:i|we|you|my \w+) (?:even )?(?:qualify|be eligible|get approved)\b|\bam i eligible\b|\bwho (?:is|can be|are) eligible\b|\bwho qualifies\b|\bwhat (?:are )?the (?:eligibility|qualification)s?\b|\bhow do i qualify\b/i, weight: 5 },
   { intent: 'eligibility', pattern: /\beligib\w*\b|\bqualif\w*\b|\bdo i (have to|need to)\b|\brequirements?\b|\bam i able\b|\bwho can apply\b|\bincome limit\b/i, weight: 3 },
   { intent: 'career_counseling', pattern: /\bcareer (advice|counsel\w*|coach\w*|guidance|plan\w*)\b|\bnot sure what\b|\bwhat career\b|\bchange careers\b|\bresume help\b|\badvisors?\b/i, weight: 2 },
   { intent: 'contact_referral', pattern: /\bcontact\b|\bphone number\b|\bcall you\b|\bemail\b|\baddress\b|\bwhere are you\b|\boffice hours\b|\bspeak to (someone|a person)\b|\bappointments?\b|\bget in touch\b/i, weight: 3 },
@@ -198,8 +200,10 @@ export function extractKeywords(text: string): string[] {
  * Cheap pronoun resolution so a follow-up like "am I eligible for that?"
  * retrieves against the program named two turns ago rather than nothing.
  */
+const REFERENT = /\b(it|its|that|those|this|them|they|the (program|one|service)|there)\b|^\s*(and|also|what about|how about)\b/i;
+
 function resolveReferences(text: string, history: { role: string; content: string }[]): string {
-  const hasReference = /\b(it|that|those|this|them|the (program|one|service)|there)\b/i.test(text);
+  const hasReference = REFERENT.test(text);
   const isShort = text.split(/\s+/).length < 8;
   if (!hasReference && !isShort) return text;
 
@@ -210,8 +214,21 @@ function resolveReferences(text: string, history: { role: string; content: strin
   const mentioned = [...recentAssistant.content.matchAll(/\*\*(?:\d+\.\s*)?([A-Z][^*\n]{3,60})\*\*/g)]
     .map((m) => m[1]!.trim())
     .slice(0, 3);
+  if (mentioned.length) return `${text} (referring to: ${mentioned.join(', ')})`;
 
-  return mentioned.length ? `${text} (referring to: ${mentioned.join(', ')})` : text;
+  // Plain-text answers carry no headings; what "it" refers to is what the person just asked about.
+  const previousQuestion = [...history].reverse().find((m) => m.role === 'user')?.content.trim();
+  return hasReference && previousQuestion ? `${text} (referring to: ${previousQuestion.slice(0, 160)})` : text;
+}
+
+const squash = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * A follow-up whose pronoun the model left unresolved ("And how much does it pay?" returned as is) must not
+ * be searched as written — it names nothing. The model's rewrite is not deterministic, so this checks it.
+ */
+export function leftUnresolved(message: string, rewritten: string, history: { role: string; content: string }[]): boolean {
+  return history.length > 0 && REFERENT.test(message) && squash(rewritten) === squash(message);
 }
 
 function splitQuestions(text: string): string[] {
@@ -274,6 +291,7 @@ const ANALYSIS_SYSTEM = `You analyse messages sent to a workforce-services assis
 Return JSON only. Your job is classification and extraction — never answer the question.
 
 intent: one of find_job, find_training, financial_assistance, career_counseling, internship, eligibility, employer_hiring, employer_training, local_services, contact_referral, general_info, off_topic.
+A question about whether someone qualifies, is eligible, or who may apply is always eligibility — even when it names a program such as a scholarship ("Do I qualify for a training scholarship?" is eligibility, not financial_assistance). Use financial_assistance only when asking what help paying exists or how much it is.
 
 rewritten_query: rewrite the latest message as a standalone search query, resolving pronouns using the conversation so far. Keep it under 30 words. If the message is already standalone, return it essentially unchanged.
 
@@ -359,7 +377,10 @@ export async function analyzeQuery(
     return {
       intent: data.intent,
       confidence: data.confidence ?? baseline.confidence,
-      rewrittenQuery: data.rewritten_query?.trim() || baseline.rewrittenQuery,
+      rewrittenQuery: ((): string => {
+        const rewritten = data.rewritten_query?.trim() || baseline.rewrittenQuery;
+        return leftUnresolved(message, rewritten, history) ? baseline.rewrittenQuery : rewritten;
+      })(),
       keywords: [...new Set([...data.keywords, ...baseline.keywords])].slice(0, 10),
       profileUpdates,
       missingInfo: redundant ? null : missing,

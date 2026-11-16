@@ -184,6 +184,8 @@ export type TurnDiagnostics = {
   unsupportedSentences: string[];
   noAnswerReason: string | null;
   rerankStrategy: string | null;
+  /** Set when every sentence of the first answer was unsupported and one corrected attempt was made. */
+  repair?: 'recovered' | 'failed';
 };
 
 /** Everything the UI needs to render one assistant turn. */

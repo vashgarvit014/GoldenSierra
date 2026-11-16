@@ -17,6 +17,10 @@ describe('ruleBasedAnalysis — intent', () => {
     ['I want to learn a new skill', 'find_training'],
     ['How can Golden Sierra help my business hire employees?', 'employer_hiring'],
     ['Do I qualify for help?', 'eligibility'],
+    ['Do I qualify for a training scholarship if I make $40,000 a year?', 'eligibility'],
+    ['Am I eligible for the Elevate Your Future scholarship?', 'eligibility'],
+    ['Who qualifies for tuition assistance?', 'eligibility'],
+    ['Is there a scholarship for training?', 'financial_assistance'],
     ['Are there paid internships?', 'internship'],
     ['What is your phone number?', 'contact_referral'],
     ['What services does Golden Sierra provide?', 'general_info'],
@@ -134,5 +138,22 @@ describe('mergeProfile', () => {
   it('ignores undefined and empty updates', () => {
     const existing: UserProfile = { county: 'Placer' };
     expect(mergeProfile(existing, { county: undefined, careerInterests: [] })).toEqual(existing);
+  });
+});
+
+describe('follow-up resolution does not depend on one model sample', () => {
+  const history = [
+    { role: 'user', content: 'What is the Cobalt Heron Apprenticeship?' },
+    { role: 'assistant', content: 'It is a training program with a new cohort every March.' },
+  ];
+  it('rule-based resolution names the topic from the previous question when the answer had no headings', () => {
+    expect(ruleBasedAnalysis('And how much does it pay?', history).rewrittenQuery).toContain('Cobalt Heron Apprenticeship');
+  });
+  it('detects a rewrite that left the pronoun unresolved', async () => {
+    const { leftUnresolved } = await import('@/lib/rag/understand');
+    expect(leftUnresolved('And how much does it pay?', 'And how much does it pay?', history)).toBe(true);
+    expect(leftUnresolved('And how much does it pay?', 'How much does the Cobalt Heron Apprenticeship pay?', history)).toBe(false);
+    expect(leftUnresolved('What is Orbit?', 'What is Orbit?', history)).toBe(false); // no referent
+    expect(leftUnresolved('how much does it pay?', 'how much does it pay?', [])).toBe(false); // nothing to resolve against
   });
 });

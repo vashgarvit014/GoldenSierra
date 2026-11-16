@@ -117,6 +117,8 @@ export const STRICT_FACTUAL_PROMPT = `You answer questions using ONLY the SOURCE
 5. After each claim put the number of the source it came from, like [1] or [2,3]. Use only numbers that appear in the SOURCES block.
 6. Do not add promotional text, calls to action, contact details, follow-up questions or suggestions unless the sources contain them and the question asks for them.
 7. No headings. Be concise: usually two to six sentences, or a short list when the sources list several items.
+8. If the sources answer only part of the question (for example they state who is eligible but give no figure for the amount the user mentions), state what they do say and stop. Do not supply, assume or comment on the missing part.
+9. If the sources come from more than one organisation, website or program and each could answer the question, answer for each one and name it, rather than choosing one silently.
 
 ## Security
 

@@ -215,6 +215,52 @@ const pad = (lines: string[]) => [...lines, ...syntheticLines(`${RUN}-filler`, 6
     check('10. a source with nothing indexed: fixed no-answer, reason recorded, nothing invented', refused(empty) && empty.diagnostics.noAnswerReason === 'no_candidates' && empty.diagnostics.candidates.length === 0, `${empty.answer} ${empty.diagnostics.noAnswerReason}`);
     info('10. a wholly empty collection and an unreachable Qdrant are covered by tests/unit/strict-turn.test.ts (they would require emptying or stopping the shared stores)');
 
+    // 11 ── calibration regressions on the real Golden Sierra knowledge base ──
+    // Answerable questions whose wording shares few words with the page that answers them.
+    const contact = await ask('How do I actually get in touch with someone?');
+    const vContact = await verifyAgainstPostgres(contact);
+    check('11. "get in touch with someone" is answered (not refused) from contact pages', !refused(contact) && contact.citations.length > 0, contact.answer.slice(0, 200));
+    check('11. …including the agency\'s own contact page, every cited sentence verified in PostgreSQL', contact.citations.some((c) => c.url?.startsWith('https://goldensierra.com')) && vContact.ok, `${vContact.why} ${JSON.stringify(contact.citations.map((c) => c.url))}`);
+
+    const elig = await ask('Do I qualify for a training scholarship if I make $40,000 a year?');
+    const vElig = await verifyAgainstPostgres(elig);
+    check('11. eligibility question: intent is eligibility', elig.analysis.intent === 'eligibility', elig.analysis.intent);
+    check('11. …answered from the published criteria (English language learners / low-income), not refused', /low-income|English language/i.test(elig.answer) && !refused(elig), elig.answer.slice(0, 250));
+    // A note that the documents are silent ("the sources do not specify an income threshold…$40,000") may echo the user's own
+    // figure; what must never appear is a claim about it, an invented threshold, or a personal verdict.
+    const claimsOnly = splitSentences(elig.answer.replace(/\n/g, ' ')).filter((x) => !/\b(sources?|documents?|pages?)\b[^.]{0,40}\b(do(es)? not|don.t)\b/i.test(x)).join(' ');
+    check('11. …no invented income threshold, no personal eligibility verdict', !/\$40,000/.test(claimsOnly) && !/\$\d/.test(claimsOnly) && !/you (qualify|are eligible|do not qualify|don.t qualify)/i.test(elig.answer), elig.answer);
+    check('11. …any statement of the documents\' silence is honest (they really publish no income threshold)', !/\bthreshold\b/i.test(elig.answer) || !(await prisma.documentChunk.count({ where: { content: { contains: 'income threshold', mode: 'insensitive' }, document: { status: 'INDEXED', url: { contains: 'goldensierra.com' } } } })), elig.answer);
+    check('11. …verified against the cited chunks', vElig.ok, vElig.why);
+
+    const amount = await ask('What is the exact dollar amount of the training scholarship?');
+    check('11. "up to $1,000" is reported as "up to", never as an exact amount', /up to \$1,000/i.test(amount.answer) && !/exact(ly)? (amount )?(is |of )?\$1,000/i.test(amount.answer), amount.answer.slice(0, 250));
+
+    const addr = await ask("Where is the job center's street address?");
+    check('11. paraphrased wording ("street address") finds the glued scraped text ("California115 Ascot Drive")', /115 Ascot/.test(addr.answer) && (await verifyAgainstPostgres(addr)).ok, addr.answer.slice(0, 200));
+
+    for (const q of ['What is the minimum wage in Oregon?', "How do I renew my driver's license?", 'What is the income limit for CalFresh?']) {
+      const r = await ask(q);
+      check(`11. near-domain but unsupported "${q}" → fixed no-answer sentence`, refused(r), r.answer.slice(0, 200));
+    }
+
+    // 12 ── routing: factual lookups vs the adaptive counselor flow (public session API) ──
+    {
+      const post = async (body: object) => (await (await fetch(`${BASE}/api/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()) as { sessionToken?: string; turn?: { stage: string; message: string; nextQuestion: string | null; sources: { url: string | null }[]; recommendations: unknown[]; knownFacts: { value?: string; label?: string }[] } };
+      const started = await post({ mode: 'self' });
+      const token = started.sessionToken!;
+      const t1 = (await post({ sessionToken: token, message: "I'm unemployed and need help finding work" })).turn!;
+      check('12. a personal statement continues through the counselor flow (asks its follow-up question)', !!t1.nextQuestion && t1.sources.length === 0, JSON.stringify({ stage: t1.stage, q: t1.nextQuestion }));
+      const t2 = (await post({ sessionToken: token, message: 'What is the fax number?' })).turn!;
+      check('12. a factual question mid-conversation is answered from the documents, with a source', /746-7733|771-2144/.test(t2.message) && t2.sources.length > 0 && t2.nextQuestion === null, t2.message.slice(0, 200));
+      const t3 = (await post({ sessionToken: token, message: 'Placer County' })).turn!;
+      check('12. …and the counselor then resumes: a bare reply is treated as an answer, not a lookup', t3.message !== NO_ANSWER_TEXT && (t3.nextQuestion !== null || t3.recommendations.length > 0 || t3.stage === 'results'), JSON.stringify({ stage: t3.stage, q: t3.nextQuestion, msg: t3.message.slice(0, 120) }));
+      const t4 = (await post({ sessionToken: token, message: 'What is the capital of France?' })).turn!;
+      check('12. an unsupported factual question mid-conversation is refused with the fixed sentence', t4.message === NO_ANSWER_TEXT && t4.sources.length === 0, t4.message.slice(0, 160));
+      const t5 = (await post({ sessionToken: token, message: 'What programs can I apply for?' })).turn!;
+      check('12. an open-ended personal question stays with the counselor (not a document lookup)', t5.message !== NO_ANSWER_TEXT, t5.message.slice(0, 160));
+    }
+
     const hello = await ask('hello');
     check('conversation: a greeting gets a greeting, with no retrieval and no knowledge-base claim', hello.answer === SMALL_TALK_TEXT && hello.diagnostics.candidates.length === 0);
 

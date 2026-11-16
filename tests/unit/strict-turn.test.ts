@@ -240,3 +240,79 @@ describe('conversation routing', () => {
     expect(r.answer).toBe(NO_ANSWER_TEXT);
   });
 });
+
+describe('one bounded repair pass when every sentence was unsupported', () => {
+  const FUSED = 'Orbit places orders through Zerodha and also guarantees profitable returns every month and is regulated by the SEC. [1]';
+  const CLEAN = 'Orbit places orders through your own Zerodha account. [1] Orbit is not a broker. [1]';
+
+  it('retries once, re-verifies the retry, and answers when the retry is supported', async () => {
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    mocks.llm.mockResolvedValueOnce({ choices: [{ message: { content: FUSED } }], usage: {} }).mockResolvedValueOnce({ choices: [{ message: { content: CLEAN } }], usage: {} });
+    const r = await ask('what is orbit');
+    expect(r.answer).toContain('Zerodha');
+    expect(r.answer).not.toContain('guarantees');
+    expect(r.diagnostics?.repair).toBe('recovered');
+    expect(r.diagnostics?.noAnswerReason).toBeNull();
+    expect(mocks.llm).toHaveBeenCalledTimes(2);
+    // the retry was told what was removed
+    const retryMessages = mocks.llm.mock.calls[1]![0].messages as { content: string }[];
+    expect(retryMessages.at(-1)!.content).toContain('guarantees profitable returns');
+  });
+
+  it('a retry that is still unsupported stays a refusal (the verifier is not bypassed)', async () => {
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    modelSays(FUSED);
+    const r = await ask('what is orbit');
+    expect(r.answer).toBe(NO_ANSWER_TEXT);
+    expect(r.diagnostics?.repair).toBe('failed');
+    expect(mocks.llm).toHaveBeenCalledTimes(2); // never a third
+  });
+
+  it('a retry that says NO_ANSWER is a refusal', async () => {
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    mocks.llm.mockResolvedValueOnce({ choices: [{ message: { content: FUSED } }], usage: {} }).mockResolvedValueOnce({ choices: [{ message: { content: 'NO_ANSWER' } }], usage: {} });
+    expect((await ask('what is orbit')).answer).toBe(NO_ANSWER_TEXT);
+  });
+
+  it('is not used when the model itself reports NO_ANSWER, or when part of the answer was supported', async () => {
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    modelSays('NO_ANSWER');
+    await ask('what is orbit');
+    expect(mocks.llm).toHaveBeenCalledTimes(1);
+    vi.clearAllMocks();
+    mocks.analyze.mockResolvedValue(analysis());
+    mocks.rerank.mockImplementation(async (_a: unknown, s: RetrievedSource[]) => ({ sources: s, rerankMs: 0, strategy: 'heuristic' }));
+    mocks.stats.mockResolvedValue({ exists: true, vectorCount: 780 });
+    mocks.profile.mockResolvedValue({ unknown: [], distinctive: ['orbit'], generic: [] });
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    modelSays('Orbit is not a broker. [1] Orbit is regulated by the SEC. [1]');
+    const r = await ask('what is orbit');
+    expect(r.answer).toContain('not a broker');
+    expect(mocks.llm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the relevance model is a veto only when the deterministic evidence is weak', () => {
+  const llm = (score: number) => mocks.rerank.mockImplementation(async (_a: unknown, s: RetrievedSource[]) => ({
+    sources: s.map((x) => ({ ...x, llmRelevance: score })), rerankMs: 0, strategy: 'llm',
+  }));
+
+  it('a passage containing every term of the question is kept even when the scorer returns ~0 for it', async () => {
+    llm(0);
+    mocks.retrieve.mockResolvedValue(retrieval([ORBIT]));
+    modelSays('Orbit is not a broker. [1]');
+    const r = await ask('what is orbit');
+    expect(r.answer).toContain('not a broker');
+    expect(r.diagnostics?.noAnswerReason).toBeNull();
+  });
+
+  it('a low score still vetoes a passage that only partly matches the question', async () => {
+    llm(1);
+    mocks.profile.mockResolvedValue({ unknown: [], distinctive: ['renew', 'license'], generic: [] });
+    mocks.retrieve.mockResolvedValue(retrieval([chunk('7', 'Commercial truck training covers license requirements for drivers.', { similarity: 0.7 })]));
+    mocks.analyze.mockResolvedValue(analysis({ rewrittenQuery: 'how do I renew my license' }));
+    const r = await ask('how do I renew my license');
+    expect(r.answer).toBe(NO_ANSWER_TEXT);
+    expect(mocks.llm).not.toHaveBeenCalled();
+  });
+});

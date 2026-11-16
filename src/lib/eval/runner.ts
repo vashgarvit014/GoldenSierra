@@ -1,5 +1,6 @@
 import { prisma } from '../db';
 import { generateAnswer } from '../rag/generate';
+import { NO_ANSWER_TEXT } from '../rag/strict';
 import type { ChatTurn, UserProfile } from '@/types/chat';
 import { ruleBasedAnalysis } from '../rag/understand';
 
@@ -51,6 +52,8 @@ export type CaseResult = {
   overall: number;
   passed: boolean;
   failures: string[];
+  /** Dimensions that do not apply to this answer (e.g. program cards for a direct factual lookup). */
+  notApplicable: (keyof DimensionScores)[];
   latencyMs: number;
 };
 
@@ -124,7 +127,12 @@ export async function runCase(evalCase: {
   const matchedPrograms = expectedPrograms.filter(
     (slug) => programsFound.includes(slug) || lower.includes(slug.replace(/-/g, ' ')),
   );
-  const programRecall = expectedPrograms.length === 0 ? 1 : matchedPrograms.length / expectedPrograms.length;
+  // A direct factual lookup is answered from the documents and carries no program cards, so
+  // recommendation recall and next steps are measured only on personal-guidance answers.
+  // Grounding, citations and fabrication checks apply to every answer.
+  const factual = result.diagnostics?.mode === 'factual';
+  const notApplicable: (keyof DimensionScores)[] = factual ? ['programRecall', 'actionable'] : [];
+  const programRecall = expectedPrograms.length === 0 || factual ? 1 : matchedPrograms.length / expectedPrograms.length;
   if (programRecall < 1 && expectedPrograms.length > 0) {
     failures.push(
       `programs: missing ${expectedPrograms.filter((s) => !matchedPrograms.includes(s)).join(', ')}`,
@@ -147,6 +155,12 @@ export async function runCase(evalCase: {
   const grounded = expectsEvidence ? (result.payload.grounded ? 1 : 0) : 1;
   if (grounded === 0) failures.push('grounding: answer was not backed by retrieved sources');
 
+  // ── False refusal ──
+  // A case that names the sources which answer it is answerable. Refusing it is a failure on its
+  // own, however the other dimensions average out: the answer is in the knowledge base.
+  const falseRefusal = answer === NO_ANSWER_TEXT && evalCase.expectedSources.length > 0;
+  if (falseRefusal) failures.push('false refusal: the knowledge base contains the answer but the assistant said it did not');
+
   // ── Fabrication guards ──
   const hitPhrases = evalCase.forbiddenPhrases.filter((phrase) =>
     lower.includes(phrase.toLowerCase()),
@@ -162,7 +176,7 @@ export async function runCase(evalCase: {
   // ── Actionability ──
   // Not applicable to an off-topic redirect: there is no workforce next step
   // to offer, and padding one in would make the answer worse.
-  const expectsAction = result.analysis.intent !== 'off_topic';
+  const expectsAction = result.analysis.intent !== 'off_topic' && !factual;
   const actionable = !expectsAction
     ? 1
     : /\b(call|contact|visit|submit|browse|check|register|apply|reach|speak|start)\b/i.test(answer)
@@ -197,14 +211,12 @@ export async function runCase(evalCase: {
     synthesized,
   };
 
-  const totalWeight = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
-  const overall =
-    (Object.entries(scores) as [keyof DimensionScores, number][]).reduce(
-      (sum, [key, value]) => sum + value * WEIGHTS[key],
-      0,
-    ) / totalWeight;
+  // Dimensions that do not apply are left out of the average rather than counted as free points.
+  const applicable = (Object.entries(scores) as [keyof DimensionScores, number][]).filter(([key]) => !notApplicable.includes(key));
+  const totalWeight = applicable.reduce((sum, [key]) => sum + WEIGHTS[key], 0);
+  const overall = applicable.reduce((sum, [key, value]) => sum + value * WEIGHTS[key], 0) / totalWeight;
 
-  const passed = MUST_PASS.every((key) => scores[key] === 1) && overall >= 0.7;
+  const passed = MUST_PASS.every((key) => scores[key] === 1) && !falseRefusal && overall >= 0.7;
 
   return {
     caseId: evalCase.id,
@@ -219,6 +231,7 @@ export async function runCase(evalCase: {
     overall,
     passed,
     failures,
+    notApplicable,
     latencyMs: Date.now() - started,
   };
 }
