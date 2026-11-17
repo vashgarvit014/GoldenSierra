@@ -71,6 +71,13 @@ export type CounselorContext = {
   timeForTraining?: 'weeks' | 'months' | 'unknown';
   barriers: string[];
   audience?: 'job_seeker' | 'employer';
+  /** Occupation keys (jobs/occupations.ts) for the roles they want. */
+  occupations?: string[];
+  /** Occupation keys for roles they have done. */
+  experience?: string[];
+  /** Skill phrases they mentioned themselves. */
+  skills?: string[];
+  rolePreference?: 'technical' | 'supervisory' | 'both';
 };
 
 export type ContextFieldKey = keyof CounselorContext;

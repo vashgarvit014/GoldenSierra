@@ -315,18 +315,22 @@ const pad = (lines: string[]) => [...lines, ...syntheticLines(`${RUN}-filler`, 6
     check('Testing Lab: a rejected (stale/orphaned) vector is displayed with its rejection reason', (await page.locator('[data-testid=candidates] tr[data-status=rejected_not_in_postgres]').count()) > 0);
 
     const chatAsk = async (q: string, until: RegExp) => {
+      // The admin chat is the Workforce Navigator: start a fresh conversation in "looking for myself" mode.
       await page.goto(`${BASE}/admin/chat`, { waitUntil: 'networkidle' });
-      await page.waitForFunction(`!document.querySelector('#chatInput')?.disabled`, null, { timeout: 30_000 });
-      await page.locator('#chatInput').fill(q);
-      await page.locator('#chatInput').press('Enter');
+      await page.evaluate(() => sessionStorage.clear());
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.locator('[data-testid=mode-self]').click();
+      await page.waitForFunction(`!document.querySelector('#navInput')?.disabled`, null, { timeout: 30_000 });
+      await page.locator('#navInput').fill(q);
+      await page.locator('#navInput').press('Enter');
       await page.waitForFunction(`/${until.source}/i.test(document.querySelector('section.page.active')?.innerText ?? '')`, null, { timeout: 90_000 }).catch(() => undefined);
       await page.waitForTimeout(600);
       return page.locator('section.page.active').innerText();
     };
     const chatYes = await chatAsk(`How much does the Cobalt Heron Apprenticeship ${RUN} pay?`, /23\.40/);
     await page.screenshot({ path: `${OUT}/admin-chat-answered.png`, fullPage: true });
-    check('Admin chat: supported question answered from the indexed document, with a source', /\$23\.40/.test(chatYes) && /1 source|sources/i.test(chatYes));
-    const chatNo = await chatAsk('What is the capital of France?', /couldn't find information/);
+    check('Admin chat: supported question answered from the indexed document, with a source', /\$23\.40/.test(chatYes) && (await page.locator('[data-testid=citations] [data-testid=source-link]').count()) > 0);
+    const chatNo = await chatAsk('What is the capital of France?', /couldn't find enough information/);
     await page.screenshot({ path: `${OUT}/admin-chat-refused.png`, fullPage: true });
     check('Admin chat: unsupported question → exactly the fixed sentence', chatNo.includes(NO_ANSWER_TEXT));
     check('Admin chat: a refusal is not padded with Golden Sierra marketing or a phone callout', !/not backed by indexed sources/i.test(chatNo) && (chatNo.match(/746-7722/g) ?? []).length <= 1 /* only the static footer */);

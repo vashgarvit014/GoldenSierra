@@ -25,6 +25,7 @@
     "setup": "tsx scripts/setup-check.ts",
     "reclassify": "tsx scripts/reclassify.ts",
     "programs:link": "tsx scripts/link-programs.ts",
+    "jobs:extract": "tsx scripts/extract-jobs.ts",
     "audit:coverage": "tsx scripts/coverage-audit.ts"
   },
   "dependencies": {

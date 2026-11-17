@@ -36,6 +36,14 @@ export function guidedQuestion(ctx: CounselorContext, focuses: Focus[]): string 
   ].join(' ');
 }
 
+async function listingDocumentIds(): Promise<Set<string>> {
+  try {
+    return new Set((await prisma.jobListing.findMany({ distinct: ['documentId'], select: { documentId: true } })).map((d) => d.documentId));
+  } catch {
+    return new Set();
+  }
+}
+
 const PER_FOCUS = 2;
 const MAX_SOURCES = 6;
 
@@ -78,6 +86,9 @@ export async function prepareGuidedResults(ctx: CounselorContext, message: strin
   const picked: RetrievedSource[] = [];
   const statuses: TurnDiagnostics['candidates'] = [];
   let failures = 0;
+  // Documents that tabulate job listings are matched per listing (jobs/match.ts). Their chunks cut across
+  // listings, so a sentence generated from them could pair one job's salary with another's employer.
+  const listingDocs = await listingDocumentIds();
 
   const perFocus = await Promise.all(
     focuses.map(async (focus) => {
@@ -85,7 +96,7 @@ export async function prepareGuidedResults(ctx: CounselorContext, message: strin
         const terms = contentTerms(focus.query);
         const r = await retrieve({ ...analysis, rewrittenQuery: focus.query, intent: 'off_topic' }, {}, { expand: false });
         if (r.vectorQueries > 0 && r.vectorFailures >= r.vectorQueries) failures++;
-        const { valid, rejected } = await validateChunks(r.sources);
+        const { valid, rejected } = await validateChunks(r.sources.filter((x) => !listingDocs.has(x.documentId)));
         const gate = relevanceGate(terms, valid);
         return { focus, gate, rejected, valid };
       } catch (err) {
@@ -169,7 +180,10 @@ function sentenceNaming(text: string, name: string): string | null {
   const flat = text.replace(/\s+/g, ' ');
   const i = flat.toLowerCase().indexOf(name.toLowerCase());
   if (i < 0) return null;
-  const start = Math.max(flat.lastIndexOf('. ', i) + 2, 0);
+  const dot = flat.lastIndexOf('. ', i);
+  // Start at the sentence, or after a heading breadcrumb ("Help for Job Seekers > …") that precedes it.
+  const crumb = flat.lastIndexOf(' > ', i);
+  const start = Math.max(dot < 0 ? 0 : dot + 2, crumb < 0 ? 0 : crumb + 3);
   const endDot = flat.indexOf('. ', i);
   const sentence = flat.slice(start, endDot < 0 ? undefined : endDot + 1).trim();
   return sentence.length > 240 ? `${sentence.slice(0, 237).trimEnd()}…` : sentence;

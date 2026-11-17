@@ -97,6 +97,7 @@ describe('guided turn: recommendations', () => {
     expect(cited.every((id) => ['c1', 'c2'].includes(id))).toBe(true);
     expect(out.payload.recommendations.map((r) => r.name)).toEqual(['Paid Internships']);
     expect(INTERNSHIP.snippet).toContain(out.payload.recommendations[0]!.shortDescription);
+    expect(out.payload.recommendations[0]!.shortDescription).toMatch(/^Get a paid internship\./); // whole sentence, first letter included
     expect(out.payload.recommendations[0]!.requiresVerification).toBe(true);
     expect(out.answer).toContain('confirmed by Golden Sierra staff');
     expect(out.payload.flow!.uncertainties.length).toBeGreaterThan(0); // early results name what is still unknown

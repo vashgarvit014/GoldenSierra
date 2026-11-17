@@ -1,0 +1,409 @@
+{
+  "summary": {
+    "keyword": {
+      "precision": 0.37,
+      "recall": 0.64,
+      "falsePositives": 12,
+      "tp": 7,
+      "fp": 12,
+      "fn": 4
+    },
+    "vector": {
+      "precision": 0.8,
+      "recall": 0.36,
+      "falsePositives": 1,
+      "tp": 4,
+      "fp": 1,
+      "fn": 7
+    },
+    "role": {
+      "precision": 0.56,
+      "recall": 0.91,
+      "falsePositives": 8,
+      "tp": 10,
+      "fp": 8,
+      "fn": 1
+    },
+    "roleBest": {
+      "precision": 1,
+      "recall": 0.45,
+      "falsePositives": 0,
+      "tp": 5,
+      "fp": 0,
+      "fn": 6
+    }
+  },
+  "perCase": [
+    {
+      "message": "I have experience installing solar panels and want a better job.",
+      "relevant": [
+        "Electrician",
+        "Traffic Control & Lighting Technician I/II"
+      ],
+      "keyword": [],
+      "vector": [],
+      "role": [
+        "Traffic Control & Lighting Technician I/II",
+        "Electrician"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "role": {
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        }
+      }
+    },
+    {
+      "message": "For five years I helped elderly people at home with bathing, dressing and meal preparation.",
+      "relevant": [
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "keyword": [
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "vector": [
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "role": [
+        "In-Home Senior Care (Caregiver)",
+        "Family Support Services Associate"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "role": {
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    {
+      "message": "I did bookkeeping in QuickBooks, invoices and accounts payable for a small company.",
+      "relevant": [
+        "Accounting Assistant"
+      ],
+      "keyword": [
+        "Accounting Assistant"
+      ],
+      "vector": [
+        "Accounting Assistant"
+      ],
+      "role": [
+        "Accounting Assistant",
+        "Administrative Legal Clerk - Entry",
+        "Administrative Services Officer I",
+        "Executive Assistant"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "role": {
+          "tp": 1,
+          "fp": 3,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    {
+      "message": "I'm interested in healthcare work.",
+      "relevant": [
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "keyword": [],
+      "vector": [],
+      "role": [
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        },
+        "role": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        }
+      }
+    },
+    {
+      "message": "I want to work in IT. I troubleshoot networks and build database reports.",
+      "relevant": [
+        "Information Technology Specialist - Senior"
+      ],
+      "keyword": [
+        "Administrative Legal Clerk - Entry",
+        "Information Technology Specialist - Senior",
+        "Education Support Specialist",
+        "Electrician"
+      ],
+      "vector": [
+        "Traffic Control & Lighting Technician I/II"
+      ],
+      "role": [
+        "Information Technology Specialist - Senior"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 1,
+          "fp": 3,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 1,
+          "fn": 1
+        },
+        "role": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    {
+      "message": "I supervised a team of housekeepers at a hotel.",
+      "relevant": [
+        "Housekeeping Manager"
+      ],
+      "keyword": [],
+      "vector": [
+        "Housekeeping Manager"
+      ],
+      "role": [
+        "Housekeeping Manager",
+        "In-Home Senior Care (Caregiver)"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        },
+        "vector": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "role": {
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        }
+      }
+    },
+    {
+      "message": "I've been an instructional aide in a classroom, tutoring students.",
+      "relevant": [
+        "Education Support Specialist"
+      ],
+      "keyword": [
+        "Education Support Specialist"
+      ],
+      "vector": [],
+      "role": [
+        "Education Support Specialist",
+        "Family Support Services Associate"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        },
+        "role": {
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    },
+    {
+      "message": "I was an office receptionist answering phones, filing and doing data entry.",
+      "relevant": [
+        "Administrative Legal Clerk - Entry",
+        "Executive Assistant"
+      ],
+      "keyword": [
+        "Administrative Legal Clerk - Entry",
+        "Information Technology Specialist - Senior",
+        "Sales Manager",
+        "Family Support Services Associate",
+        "Executive Assistant",
+        "Housekeeping Manager",
+        "Education Support Specialist",
+        "Accounting Assistant",
+        "Administrative Services Officer I",
+        "Electrician"
+      ],
+      "vector": [],
+      "role": [
+        "Administrative Legal Clerk - Entry",
+        "Administrative Services Officer I",
+        "Accounting Assistant",
+        "Executive Assistant"
+      ],
+      "res": {
+        "keyword": {
+          "tp": 2,
+          "fp": 8,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 2
+        },
+        "role": {
+          "tp": 2,
+          "fp": 2,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 1
+        }
+      }
+    },
+    {
+      "message": "I sold cars for years and want to lead a sales team now.",
+      "relevant": [
+        "Sales Manager"
+      ],
+      "keyword": [
+        "Sales Manager",
+        "Housekeeping Manager"
+      ],
+      "vector": [
+        "Sales Manager"
+      ],
+      "role": [],
+      "res": {
+        "keyword": {
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "role": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        },
+        "roleBest": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 1
+        }
+      }
+    },
+    {
+      "message": "I want to work as a deep sea saturation diver.",
+      "relevant": [],
+      "keyword": [],
+      "vector": [],
+      "role": [],
+      "res": {
+        "keyword": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        },
+        "vector": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        },
+        "role": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        },
+        "roleBest": {
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        }
+      }
+    }
+  ]
+}

@@ -8,7 +8,6 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
-import { chromium, type Page } from 'playwright';
 import { prisma } from '../../src/lib/db';
 import { env } from '../../src/lib/env';
 import { getQdrant } from '../../src/lib/vector/qdrant';
@@ -17,8 +16,6 @@ import { namedIn } from '../../src/lib/programs/link';
 import type { AssistantPayload } from '../../src/types/chat';
 
 const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3100';
-const EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@goldensierra.test';
-const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'TestPassword123!';
 const OUT = path.resolve('test-artifacts/guided-flow');
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -164,90 +161,8 @@ const questions = (s: string) => (s.match(/\?/g) ?? []).length;
     const ctxE = (await prisma.chatSession.findFirst({ where: { id: sessions[3] }, select: { profile: true } }))?.profile as { flow?: { context: Record<string, unknown> } };
     check('isolation: each session keeps only its own facts', !JSON.stringify(ctxE?.flow?.context ?? {}).match(/foster|auburn/i), JSON.stringify(ctxE?.flow?.context));
 
-    // ── Browser: the admin chat ──
-    const browser = await chromium.launch({ channel: 'chrome', headless: process.env.HEADLESS === '1' });
-    const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
-    const errors: string[] = [];
-    page.on('console', (m) => { if (m.type() === 'error' && !/401|Failed to load resource|negative time stamp/i.test(m.text())) errors.push(m.text()); });
-    await page.goto(`${BASE}/admin/chat`, { waitUntil: 'networkidle' });
-    await page.locator('#email').fill(EMAIL); await page.locator('#password').fill(PASSWORD);
-    await page.getByRole('button', { name: 'Sign in' }).click(); await page.locator('.sidebar').waitFor({ timeout: 25_000 });
-    await page.goto(`${BASE}/admin/chat`, { waitUntil: 'networkidle' });
-
-    const assistantCount = (p: Page) => p.locator('.chat-body .message:not(.user) .answer').count();
-    const waitTurn = async (p: Page, before: number) => {
-      await p.waitForFunction((n) => document.querySelectorAll('.chat-body .message:not(.user) .answer').length > n && !document.querySelector('.typing'), before, { timeout: 120_000 });
-      await p.waitForTimeout(500);
-    };
-    const lastAnswer = (p: Page) => p.locator('.chat-body .message:not(.user) .answer').last().innerText();
-    const say = async (p: Page, text: string) => {
-      const n = await assistantCount(p);
-      await p.waitForFunction(`!document.querySelector('#chatInput')?.disabled`, null, { timeout: 30_000 });
-      await p.locator('#chatInput').fill(text);
-      await p.locator('#chatInput').press('Enter');
-      await waitTurn(p, n);
-    };
-    const fresh = async () => {
-      await page.getByRole('button', { name: /New conversation/ }).click();
-      await page.waitForFunction(`!document.querySelector('#chatInput')?.disabled`, null, { timeout: 30_000 });
-    };
-
-    await fresh();
-    await say(page, FOSTER);
-    const ui1 = await lastAnswer(page);
-    await page.screenshot({ path: `${OUT}/A1-clarifying.png`, fullPage: true });
-    const qr = await page.locator('[data-testid=quick-reply]').count();
-    check('Browser A1: one question, 2–4 functional quick-reply buttons and a "Show results now" option', questions(ui1) === 1 && qr >= 2 && qr <= 4 && (await page.locator('[data-testid=show-results]').count()) === 1, `${qr} ${ui1}`);
-    const side = await page.locator('[data-testid=known-facts]').innerText();
-    check('Browser A1: "What I know so far" shows the extracted facts', /Healthcare/.test(side) && /19 years old/.test(side) && /Helping someone else/.test(side), side);
-    const pageText1 = await page.locator('section.page.active').innerText();
-    check('Browser: no "Assuming from what you\'ve told me" box and no generic warning card', !/Assuming from what/i.test(pageText1) && (await page.locator('section.page.active .chat-body .callout').count()) === 0, `${await page.locator('section.page.active .chat-body .callout').allInnerTexts()}`);
-
-    await say(page, 'She has no reliable transportation and lives near Auburn.');
-    await page.screenshot({ path: `${OUT}/A2-adjusted.png`, fullPage: true });
-    const side2 = await page.locator('[data-testid=known-facts]').innerText();
-    check('Browser A2: context updated in the side panel (Auburn, no transport) and earlier facts kept', /Auburn/.test(side2) && /no transport/i.test(side2) && /Healthcare/.test(side2), side2);
-
-    // Answer the urgency by clicking the matching quick reply when offered — a button submits a real message.
-    const urgent = page.locator('[data-testid=quick-reply]', { hasText: /income now/i });
-    if (await urgent.count()) {
-      const n = await assistantCount(page);
-      await urgent.first().click();
-      await waitTurn(page, n);
-    } else await say(page, 'She needs income urgently.');
-    await page.screenshot({ path: `${OUT}/A3-results.png`, fullPage: true });
-    const ui3 = await lastAnswer(page);
-    const chip = page.locator('.chat-body .message:not(.user)').last().locator('.source-chip', { hasText: /sources?/ });
-    check('Browser A3: results with sources and the staff-confirmation caveat', (await chip.count()) > 0 && /confirmed by Golden Sierra staff/.test(ui3), ui3.slice(0, 300));
-    if (await chip.count()) {
-      await chip.first().click();
-      const links = await page.locator('.chat-body .message:not(.user)').last().locator('.link-row a').evaluateAll((as) => as.map((x) => (x as HTMLAnchorElement).href));
-      const known = links.length ? await prisma.document.count({ where: { url: { in: links }, status: 'INDEXED' } }) : 0;
-      check('Browser A3: every source link shown is an indexed document', links.length > 0 && known === new Set(links).size, links.join(' '));
-    }
-
-    await say(page, 'Actually, she does have a car now.');
-    await page.screenshot({ path: `${OUT}/D-correction.png`, fullPage: true });
-    const side4 = await page.locator('[data-testid=known-facts]').innerText();
-    check('Browser D: correction reflected (has a vehicle) and acknowledged', /vehicle/i.test(side4) && /updated/i.test(await lastAnswer(page)), side4);
-
-    await fresh();
-    await say(page, "I'm unemployed and want to get into healthcare.");
-    const nE = await assistantCount(page);
-    await page.locator('[data-testid=show-results]').click();
-    await waitTurn(page, nE);
-    await page.screenshot({ path: `${OUT}/E-early-results.png`, fullPage: true });
-    check('Browser E: "Show results now" returns evidence-backed options and names what is still unknown', /Still unknown:/.test(await lastAnswer(page)) && (await page.locator('.chat-body .message:not(.user)').last().locator('.source-chip', { hasText: /sources?/ }).count()) > 0);
-
-    await fresh();
-    await say(page, 'What is Orbit?');
-    await page.screenshot({ path: `${OUT}/B-orbit.png`, fullPage: true });
-    check('Browser B: direct cited answer, no quick replies or questionnaire', /orbit/i.test(await lastAnswer(page)) && (await page.locator('[data-testid=quick-reply]').count()) === 0 && (await page.locator('[data-testid=show-results]').count()) === 0);
-
-    await say(page, 'What is the capital of France?');
-    check('Browser C: unsupported → the fixed sentence', (await lastAnswer(page)).trim() === NO_ANSWER_TEXT);
-    check('Browser: no unexpected console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
-    await browser.close();
+    // The admin chat's browser checks (mode selection, quick replies, sidebar, narrowing, results, mobile)
+    // live in tests/e2e/navigator.ts since the Workforce Navigator replaced the chat presentation.
   } catch (err) {
     fail++;
     console.log('FAIL  script error →', String(err).slice(0, 700));

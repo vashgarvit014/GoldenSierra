@@ -16,7 +16,7 @@ import type { CandidateStatus, Citation, RetrievedSource, TurnDiagnostics } from
  * and cannot be talked out of by a prompt.
  */
 
-export const NO_ANSWER_TEXT = "I couldn't find information about that in the currently indexed knowledge base.";
+export const NO_ANSWER_TEXT = "I couldn't find enough information about that in the currently indexed knowledge base.";
 export const KB_UNAVAILABLE_TEXT =
   "I can't reach the knowledge base right now, so I can't answer that. Please try again in a moment.";
 /** The model produced nothing usable (even after the bounded retry). Not a claim about the index. */

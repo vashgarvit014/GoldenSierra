@@ -8,6 +8,7 @@ import { SUBJECT } from '@/types/counselor';
 import { mergeContext, ruleExtract } from './extract';
 import { requirementVerdicts, type ProgramRow } from './matching';
 import { focusQueries } from '../conversation/focus';
+import { relatedOf } from '../jobs/occupations';
 
 /**
  * Adaptive next-question selection.
@@ -35,7 +36,8 @@ export type QuestionId =
   | 'employmentStatus'
   | 'transportation'
   | 'incomeUrgency'
-  | 'population';
+  | 'population'
+  | 'rolePreference';
 
 export type Question = {
   id: QuestionId;
@@ -167,6 +169,21 @@ export const QUESTIONS: Question[] = [
     ],
     applicable: seeker,
   },
+  {
+    id: 'rolePreference',
+    field: 'rolePreference',
+    baseValue: 0.6,
+    prompt: (mode) =>
+      `Would ${s(mode).pronoun} prefer to keep doing hands-on technical work, or ${s(mode).pronoun === 'you' ? 'would you' : 'would they'} consider a supervisory or lead role?`,
+    quickReplies: () => [
+      { label: 'Technical work', value: 'Hands-on technical work' },
+      { label: 'Supervisory roles', value: 'Supervisory or lead roles' },
+      { label: 'Open to both', value: 'Open to both technical and supervisory roles' },
+    ],
+    // Only when a role they have done or want has a lead/supervisory step in the occupation taxonomy.
+    applicable: (ctx) =>
+      seeker(ctx) && [...relatedOf([...(ctx.occupations ?? []), ...(ctx.experience ?? [])]).values()].includes('supervisory'),
+  },
 ];
 
 /** Shannon entropy of the answer outcomes, normalised by the number of answers offered. */
@@ -191,13 +208,16 @@ export type AnswerSplit = {
  * Simulates each offered answer: re-evaluate the programs' published requirements and rebuild the
  * retrieval plan. Answers the extractor cannot read leave the context unchanged — an honest "no information".
  */
-export function answerSplit(q: Question, ctx: CounselorContext, programs: ProgramRow[]): AnswerSplit {
+/** Extra published requirements to simulate (job listings' qualifications, location, deadline). */
+export type ExtraVerdicts = (ctx: CounselorContext) => string;
+
+export function answerSplit(q: Question, ctx: CounselorContext, programs: ProgramRow[], extra?: ExtraVerdicts): AnswerSplit {
   const replies = q.quickReplies(ctx.mode);
   const verdictKeys: string[] = [];
   const outcomes = new Map<string, number>();
   for (const r of replies) {
     const next = mergeContext(ctx, ruleExtract(r.value, ctx));
-    const verdicts = programs.map((p) => requirementVerdicts(p, next)).join('|');
+    const verdicts = programs.map((p) => requirementVerdicts(p, next)).join('|') + (extra ? `#jobs:${extra(next)}` : '');
     const plan = focusQueries(next, '').map((f) => f.query).join('|');
     verdictKeys.push(verdicts);
     const key = `${verdicts}#${plan}`;
@@ -250,10 +270,11 @@ export function selectNextQuestion(
   candidates: ProgramMatch[],
   asked: string[],
   programs: ProgramRow[] = [],
+  extra?: ExtraVerdicts,
 ): QuestionChoice | null {
   const live = livePrograms(candidates, programs);
   const scored = openQuestions(ctx, asked).map((q) => {
-    const { split } = answerSplit(q, ctx, live);
+    const { split } = answerSplit(q, ctx, live, extra);
     const base = split * 0.9 + q.baseValue * 0.1;
     // A question they already sidestepped goes behind anything still fresh.
     return { question: q, gain: timesAsked(asked, q.id) > 0 ? base * 0.5 : base };
@@ -301,13 +322,14 @@ export function readyForResults(
   candidates: ProgramMatch[],
   asked: string[] = [],
   programs: ProgramRow[] = [],
+  extra?: ExtraVerdicts,
 ): boolean {
   if (asked.length >= QUESTION_BUDGET) return true;
   const applied = criteriaFor(ctx).filter((c) => c.applied).length;
   const liveCount = candidates.filter((c) => c.state !== 'mismatch').length;
   const live = livePrograms(candidates, programs);
   const outstanding = openQuestions(ctx, asked).some((q) => {
-    const { split, changesRequirements } = answerSplit(q, ctx, live);
+    const { split, changesRequirements } = answerSplit(q, ctx, live, extra);
     return (changesRequirements && split >= 0.5) || split >= 0.9;
   });
   if (outstanding) return false;

@@ -1,3 +1,4 @@
+import type { NarrowingCounts, NavigatorResults } from './navigator';
 /**
  * Shared contract between the RAG pipeline, the API layer and the UI.
  * Kept free of server-only imports so client components can use it.
@@ -206,6 +207,8 @@ export type AssistantPayload = {
   latencyMs: number;
   /** Structured conversation state (admin chat guided flow). */
   flow?: FlowPayload;
+  /** Workforce Navigator: real narrowing counts every guided turn; grouped role-based results on results turns. */
+  navigator?: { narrowing: NarrowingCounts; results?: NavigatorResults };
 };
 
 export type ChatTurn = {

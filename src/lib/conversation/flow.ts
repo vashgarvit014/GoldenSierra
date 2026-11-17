@@ -12,7 +12,11 @@ import { completeTurn, type PreparedTurn } from '../rag/generate';
 import { GENERATION_FAILED_TEXT, NO_ANSWER_TEXT } from '../rag/strict';
 import { completeAnswer } from '../ai/complete';
 import { cardsFromCitations, prepareGuidedResults, type Focus } from './evidence';
-import { SUBJECT, type CounselorContext, type QuickReply } from '@/types/counselor';
+import { jobVerdicts, loadListings, matchJobs, roleProfile, scoreListings, type ListingRow } from '../jobs/match';
+import { OCCUPATION_BY_KEY } from '../jobs/occupations';
+import type { JobMatch, NarrowingCounts, NavigatorResults } from '@/types/navigator';
+import type { Recommendation } from '@/types/chat';
+import { SUBJECT, type CounselorContext, type ProgramMatch, type QuickReply } from '@/types/counselor';
 import type { AssistantPayload, ChatTurn } from '@/types/chat';
 import type { FlowPayload, FlowStage, FlowState } from '@/types/flow';
 
@@ -96,6 +100,10 @@ export function knownFactsRecord(ctx: CounselorContext): Record<string, string> 
     out[key] = out[key] && key === 'situation' ? `${out[key]}, ${f.label}` : f.label;
   }
   if (ctx.audience) out.audience = ctx.audience === 'employer' ? 'Employer' : 'Job seeker';
+  const roles = (keys?: string[]) => (keys ?? []).map((k) => OCCUPATION_BY_KEY.get(k)?.title).filter(Boolean).join(', ');
+  if (ctx.occupations?.length) out.desiredRole = roles(ctx.occupations);
+  if (ctx.experience?.length) out.experience = roles(ctx.experience);
+  if (ctx.rolePreference) out.rolePreference = { technical: 'Hands-on technical work', supervisory: 'Supervisory or lead roles', both: 'Technical or supervisory' }[ctx.rolePreference];
   return out;
 }
 
@@ -132,6 +140,7 @@ const WHY: Record<Question['id'], string> = {
   transportation: 'Being able to reach a training site or office matters as much as the service itself.',
   incomeUrgency: 'Needing income soon points toward job-search help; having time points toward training.',
   population: 'Some services focus on particular groups.',
+  rolePreference: 'Some related openings are hands-on and some are lead roles.',
 };
 
 const ACK_SYSTEM = `You write the opening of a workforce counselor's reply. You have NOT looked anything up yet.
@@ -261,26 +270,35 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   // ── decide: one more question, or results ──
   let matches: ReturnType<typeof rankMatches> = [];
   let programs: Awaited<ReturnType<typeof loadPrograms>> = [];
+  let listings: ListingRow[] = [];
   try {
     programs = await loadPrograms();
     matches = rankMatches(matchPrograms(programs, ctx));
   } catch (err) {
     logger.warn('Program catalogue unavailable for question selection', { error: String(err) });
   }
+  try {
+    listings = await loadListings();
+  } catch (err) {
+    logger.warn('Job listings unavailable for question selection', { error: String(err) });
+  }
+  // Job listings' published requirements take part in choosing the next question, like program rules.
+  const jobs = listings.length ? jobVerdicts(listings) : undefined;
+  const narrowing = narrowingCounts(ctx, matchPrograms(programs, ctx), listings);
   const asked = input.flow.askedQuestions;
   const early = Boolean(input.forceResults) || wantsResults(input.message);
   const ready =
     early ||
     (hadResults && contextChanged) ||
     asked.length >= MAX_CLARIFYING ||
-    readyForResults(ctx, matches, asked, programs);
+    readyForResults(ctx, matches, asked, programs, jobs);
   // Never put the same question twice in a row: if the reply answered something else, move on to the
   // next most useful question; if nothing else is worth asking, show results rather than badger.
   const pending = input.flow.pendingQuestion;
-  const fresh = ready ? null : selectNextQuestion(ctx, matches, pending ? [...asked, pending, pending] : asked, programs);
+  const fresh = ready ? null : selectNextQuestion(ctx, matches, pending ? [...asked, pending, pending] : asked, programs, jobs);
   // …except a decisive question the reply left unanswered, which is put once more (it is the one that
   // separates job-search help from training), acknowledging what they did say first.
-  const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked, programs) : null;
+  const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked, programs, jobs) : null;
   const choice = fresh ?? (reask?.question.id === pending ? reask : null);
   const subject = SUBJECT[ctx.mode];
 
@@ -298,6 +316,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
       quickReplies: choice.question.quickReplies(ctx.mode),
       knownFacts: nowFacts, uncertainties: [], canShowResults: Object.keys(nowFacts).length >= 1, corrections,
     });
+    payload.navigator = { narrowing };
     return { answer, payload, flow, prepared: null, path };
   }
 
@@ -311,10 +330,10 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
 
   const uncertainties = uncertaintiesFor(ctx);
   // One refinement question at most, and only one that has not been asked twice already.
-  const nextRefine = uncertainties.length ? selectNextQuestion(ctx, matches, asked, programs) : null;
+  const nextRefine = uncertainties.length ? selectNextQuestion(ctx, matches, asked, programs, jobs) : null;
   const refine = nextRefine && uncertainties.includes(UNCERTAINTY[nextRefine.question.id] ?? '') ? nextRefine : null;
-  const { answer, done, prepared, recommendations, answered, focuses } = await verifiedResults({
-    ctx, message: input.message, extra, started, corrections, uncertainties, refine: refine?.question.prompt(ctx.mode, ctx) ?? null,
+  const { answer, done, prepared, recommendations, answered, focuses, navigator } = await verifiedResults({
+    ctx, message: input.message, extra, started, corrections, uncertainties, refine: refine?.question.prompt(ctx.mode, ctx) ?? null, jobs: true,
   });
   const flow: FlowState = {
     stage, context: ctx,
@@ -333,6 +352,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
       quickReplies: refine ? refine.question.quickReplies(ctx.mode) : [],
       knownFacts: nowFacts, uncertainties, canShowResults: false, corrections,
     }),
+    navigator: { narrowing, results: navigator },
   };
   logger.info('Guided turn', { path, focuses: focuses.map((f) => f.key), answered, cards: recommendations.length, ms: Date.now() - started, subject: subject.pronoun });
   return { answer, payload, flow, prepared, path };
@@ -351,8 +371,13 @@ export async function verifiedResults(a: {
   corrections: string[];
   uncertainties: string[];
   refine: string | null;
+  /** Include role-based job matches (admin Workforce Navigator). */
+  jobs?: boolean;
 }) {
-  const { prepared, focuses, focusOf } = await prepareGuidedResults(a.ctx, a.message, a.extra);
+  const [{ prepared, focuses, focusOf }, jobs] = await Promise.all([
+    prepareGuidedResults(a.ctx, a.message, a.extra),
+    a.jobs ? matchJobs(a.ctx) : Promise.resolve({ matches: [] as JobMatch[], total: 0 }),
+  ]);
   const rawAnswer = prepared.preAnswer === null ? await generate(prepared) : '';
   const done = await completeTurn(prepared, rawAnswer, prepared.diagnostics.query, a.started);
   const answered = done.answer !== NO_ANSWER_TEXT && done.payload.citations.length > 0;
@@ -360,9 +385,42 @@ export async function verifiedResults(a: {
   // Needs that no cited passage speaks to are said plainly, rather than implied to be covered.
   const citedChunks = new Set(done.payload.citations.flatMap((c) => c.chunkIds ?? []));
   const covered = new Set([...citedChunks].map((id) => focusOf.get(id)?.key).filter(Boolean));
-  const uncovered = answered ? focuses.filter((f) => !covered.has(f.key)).map((f) => f.label) : [];
-  const answer = composeResults({ ctx: a.ctx, focuses, verified: done.answer, answered, corrections: a.corrections, uncertainties: a.uncertainties, uncovered, refine: a.refine });
-  return { answer, done, prepared, recommendations, answered, focuses };
+  const open = jobs.matches.filter((m) => m.listingStatus !== 'closed');
+  const bestJobs = open.filter((m) => m.kind === 'exact').slice(0, 4);
+  const relatedJobs = open.filter((m) => m.kind !== 'exact').slice(0, 4);
+  // Job listings are matched structurally (above), so a "finding work" or career need they answer is covered.
+  if (bestJobs.length + relatedJobs.length) covered.add('work').add('career');
+  const uncovered = focuses.filter((f) => !covered.has(f.key)).map((f) => f.label);
+  const answer = composeResults({
+    ctx: a.ctx, focuses, verified: done.answer, answered, corrections: a.corrections, uncertainties: a.uncertainties,
+    uncovered: answered || bestJobs.length + relatedJobs.length ? uncovered : [], refine: a.refine,
+    jobs: a.jobs ? { best: bestJobs.length, related: relatedJobs.length, closed: jobs.matches.length - open.length, total: jobs.total } : undefined,
+  });
+  const p = roleProfile(a.ctx);
+  const isTraining = (r: Recommendation) => /training|scholarship|internship|metrix|learning|class/i.test(`${r.slug ?? ''} ${r.name}`);
+  const navigator: NavigatorResults = {
+    bestJobs, relatedJobs,
+    training: recommendations.filter(isTraining),
+    support: recommendations.filter((r) => !isTraining(r)),
+    roleSearch: { own: p.own.map((k) => OCCUPATION_BY_KEY.get(k)!.title), related: [...p.related.keys()].map((k) => OCCUPATION_BY_KEY.get(k)!.title) },
+  };
+  return { answer, done, prepared, recommendations, answered, focuses, navigator };
+}
+
+/**
+ * Real narrowing counts: job listings by role relation, deadline and published requirements; catalogue
+ * services by confirmed rule exclusions. Nothing is estimated and no similarity score is used.
+ */
+export function narrowingCounts(ctx: CounselorContext, matches: ProgramMatch[], listings: ListingRow[]): NarrowingCounts {
+  const scored = scoreListings(listings, ctx);
+  const closed = scored.filter((m) => m.listingStatus === 'closed').length;
+  const open = scored.filter((m) => m.listingStatus !== 'closed');
+  const total = matches.length;
+  const live = matches.filter((m) => m.state !== 'mismatch');
+  return {
+    listings: { total: listings.length, relevant: scored.length, closed, unmet: open.filter((m) => m.requirements.some((r) => r.status === 'unmet')).length, open: open.length },
+    programs: { total, excluded: total - live.length, possible: live.length, unconfirmed: live.filter((m) => m.state !== 'eligible').length },
+  };
 }
 
 /** Deterministic lead-in + the verified answer + what is still open. Only the verified part states facts. */
@@ -376,17 +434,30 @@ export function composeResults(a: {
   /** Needs searched for that no cited passage addresses. */
   uncovered?: string[];
   refine: string | null;
+  /** Counts of role-matched indexed job listings (shown as cards beside the message). */
+  jobs?: { best: number; related: number; closed: number; total: number };
 }): string {
   const s = SUBJECT[a.ctx.mode];
   const join = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : xs[0] ?? '');
   const list = join(a.focuses.map((f) => f.label)) || 'this request';
   const parts: string[] = [];
   const updated = a.corrections.length ? "Thanks — I've updated that. " : '';
+  const j = a.jobs;
+  const anyJobs = Boolean(j && j.best + j.related > 0);
+  const closedNote = j?.closed ? ` (${j.closed} more matched, but their deadlines have passed)` : '';
+  const jobLine = !j
+    ? null
+    : anyJobs
+      ? `I also checked the ${j.total} indexed job listings: ${j.best ? `${j.best} ${j.best === 1 ? 'is' : 'are'} the kind of role ${s.pronoun} described` : `none is the exact role ${s.pronoun} described`}${j.related ? `, and ${j.related} ${j.related === 1 ? 'is a related role' : 'are related roles'}` : ''}${closedNote}. They are listed below with their sources.`
+      : `I checked the ${j.total} indexed job listings and found none related to the roles ${s.pronoun} described${closedNote}.`;
   if (!a.answered) {
     parts.push(`${updated}I searched the indexed knowledge base for ${list}.`, a.verified === GENERATION_FAILED_TEXT ? GENERATION_FAILED_TEXT : NO_ANSWER_TEXT);
+    if (jobLine) parts.push(jobLine);
+    if (anyJobs) parts.push(`Whether ${s.pronoun} meet a listing's requirements is for the employer to decide; check the posting before applying.`);
   } else {
     parts.push(`${updated}Based on what you've shared, I searched the indexed sources for ${list}. Here is what they describe:`, a.verified);
     if (a.uncovered?.length) parts.push(`I didn't find indexed information on ${join(a.uncovered)}.`);
+    if (jobLine) parts.push(jobLine);
     parts.push(`Whether ${s.pronoun} qualify for any of these is confirmed by Golden Sierra staff, not by me.`);
   }
   if (a.uncertainties.length) {

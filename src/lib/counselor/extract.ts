@@ -6,6 +6,7 @@ import { withTimeout } from '../errors';
 import { parseModelJson } from '../ai/json';
 import { structuredTokenBudget } from '../ai/prompts';
 import type { CounselorContext, PopulationTag } from '@/types/counselor';
+import { classify, skillsIn } from '../jobs/occupations';
 
 /**
  * Context extraction for counselor mode.
@@ -128,7 +129,7 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
   // ── Income urgency ──
   if (/\bneeds? (?:income|money|a job|work|to earn|a paycheck) (?:now|soon|right away|asap|quickly|fast|immediately)|income as soon|\burgent(?:ly)?\b|as soon as possible|right away|immediately|\basap\b|\bpaycheck (?:asap|now|soon|fast)|\bmoney fast\b|\bbills (?:are )?(?:due|piling)|\bcan'?t afford to wait|\bbehind on rent\b/i.test(text)) out.incomeUrgency = 'immediate';
   else if (/\bcan (?:focus on |do |afford to )?train|\btrain(?:ing)? first|few months|\bno rush\b|\bnot in a (?:hurry|rush)\b|\bhas savings\b|\bcan wait\b/i.test(text)) out.incomeUrgency = 'can_train_first';
-  else if (/\bopen to (?:both|either)\b/i.test(text)) out.incomeUrgency = 'flexible';
+  else if (/\bopen to (?:both|either)\b(?! (?:technical|kinds? of role))/i.test(text)) out.incomeUrgency = 'flexible';
 
   // ── Employment ── (a layoff is its own status; it decides dislocated-worker services)
   if (/\blaid off|\blayoff|\blet go\b/i.test(text)) out.employmentStatus = 'laid_off';
@@ -152,9 +153,23 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
   else if (/\bit\b|tech|software|cyber|comput/i.test(text)) out.careerInterest = 'technology';
   else if (occupation?.[1]) out.careerInterest = cleanInterest(occupation[1]);
 
+  // ── Roles: what they have done vs what they want (occupation taxonomy; vocabulary, not facts) ──
+  const roleHits = classify(text, 2).map((h) => h.key).slice(0, 2);
+  if (roleHits.length) {
+    const did = /\b(worked|work(?:ing)? as|experience|background|used to|years (?:as|in|of)|(?:spent|for|over) (?:\d+|a few|several|one|two|three|four|five|six|seven|eight|nine|ten|many) years|helped|took care of|cared for|supervised|led|operated|installed|repaired|taught|cooked|cleaned|drove|built|fixed|sold|i did|did (?:the )?\w+ing|handled|ran|managed|i was an?|she was an?|he was an?|previously|have been an?|i'?ve been an?|currently an?)\b/i.test(text);
+    const wants = /\b(want|wants|interested|looking for|become|aiming|hoping|would like|get into)\b/i.test(text);
+    if (did) out.experience = roleHits;
+    // "Experience installing solar panels, wants a better job" names a past role, not a new target.
+    if (wants && !did) out.occupations = roleHits;
+  }
+  const skills = skillsIn(text);
+  if (skills.length) out.skills = skills;
+  if (/\bsupervis|\blead (?:a |the )?(?:team|crew)|\bmanag(?:e|ing) (?:a team|people|staff)|\bsupervisory\b|\bcrew lead\b/i.test(text) && !/\b(not|no|don'?t want)\b.{0,20}supervis/i.test(text)) out.rolePreference = /\bboth\b/i.test(text) ? 'both' : 'supervisory';
+  else if (/\bhands-on\b|\btechnical (?:work|role)/i.test(text)) out.rolePreference = /\bboth\b/i.test(text) ? 'both' : 'technical';
+
   // ── Audience ──
   if (/\b(my|our) (business|company|staff|team|restaurant|shop|store|clinic|firm)\b|\bi(?:'m| am) an employer\b|\bhiring for\b|\b(?:need|needs|looking|want|wants|trying|plan(?:ning)?) to hire\b|\bwe(?:'re| are) hiring\b|\bi (?:own|run|manage) (?:a|an|the|my) (?:\w+ )?(?:business|company|restaurant|shop|store|firm|practice|clinic|farm|bakery|cafe|salon)\b/i.test(text)) out.audience = 'employer';
-  else if (/\b(looking for (?:a )?(?:work|job)|need(?:s)? (?:a )?(?:job|work)|find (?:me |her |him |them )?a job|job hunting|helping (a|an|someone|my))\b/i.test(text) || out.employmentStatus === 'laid_off' || out.employmentStatus === 'unemployed') out.audience = 'job_seeker';
+  else if (/\b(?:want|wants|need|needs|looking for) (?:a |an )?(?:better|new|different|another|higher-paying|better-paying)[- ]?(?:paying )?(?:job|work|career|position)\b|\b(looking for (?:a )?(?:work|job)|need(?:s)? (?:a )?(?:job|work)|find (?:me |her |him |them )?a job|job hunting|helping (a|an|someone|my))\b/i.test(text) || out.employmentStatus === 'laid_off' || out.employmentStatus === 'unemployed') out.audience = 'job_seeker';
 
   // ── Barriers ──
   const barriers = new Set(ctx.barriers ?? []);
@@ -312,6 +327,11 @@ export function mergeContext(
     if (value === undefined || value === null || value === '') continue;
     if (Array.isArray(value)) {
       if (value.length === 0) continue;
+      // A newly stated role replaces the old one (a changed career preference is a correction).
+      if (key === 'occupations' || key === 'experience') {
+        (next[key] as string[]) = value as string[];
+        continue;
+      }
       const previous = (current[key] as string[] | undefined) ?? [];
       (next[key] as string[]) = [...new Set([...previous, ...(value as string[])])].slice(0, 8);
     } else {
@@ -328,8 +348,9 @@ export function mergeContext(
 
 /** Scalar fields whose earlier value this turn replaced — a correction, not new information. */
 export function changedFields(before: CounselorContext, after: CounselorContext): string[] {
-  const keys: (keyof CounselorContext)[] = ['age', 'county', 'city', 'careerInterest', 'education', 'employmentStatus', 'transportation', 'incomeUrgency', 'audience'];
-  return keys.filter((k) => before[k] !== undefined && before[k] !== null && after[k] !== before[k]);
+  const keys: (keyof CounselorContext)[] = ['age', 'county', 'city', 'careerInterest', 'education', 'employmentStatus', 'transportation', 'incomeUrgency', 'audience', 'rolePreference', 'occupations'];
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return keys.filter((k) => before[k] !== undefined && before[k] !== null && !same(after[k], before[k]));
 }
 
 function normaliseCounty(value: string | null | undefined) {

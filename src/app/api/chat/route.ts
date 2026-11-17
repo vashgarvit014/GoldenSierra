@@ -43,6 +43,8 @@ const BodySchema = z.object({
   stream: z.boolean().optional().default(true),
   /** "Show results now" — recommendations from what is known so far. */
   forceResults: z.boolean().optional(),
+  /** Chosen on the mode screen: helping someone (third person) or looking for myself (second person). */
+  mode: z.enum(['self', 'helper']).optional(),
 });
 
 type Produced = { answer: string; payload: AssistantPayload; prepared: PreparedTurn | null; profile: UserProfile & { flow: FlowState } };
@@ -67,7 +69,9 @@ export const POST = withErrorHandling(async (request: Request) => {
   const { session, profile: storedProfile, history } = await loadSession(body.sessionToken);
   // Guided-conversation state lives with the session (per user/session, never in the vector store).
   const { flow: storedFlow, ...profile } = storedProfile as UserProfile & { flow?: unknown };
-  const flow = readFlow(storedFlow);
+  const stored = readFlow(storedFlow);
+  // The explicit choice wins over inference; it is fixed for the conversation once made.
+  const flow = body.mode && stored.stage === 'START' ? { ...stored, context: { ...stored.context, mode: body.mode } } : stored;
 
   const started = Date.now();
   await appendUserMessage(session.id, message);
@@ -76,7 +80,9 @@ export const POST = withErrorHandling(async (request: Request) => {
   // the assistant's own question once a guided conversation is under way) goes through the guided flow.
   const route = body.forceResults
     ? ({ kind: 'personal' } as const)
-    : routeMessage(message, { fallback: flow.stage === 'START' ? 'factual' : 'personal' });
+    : // Choosing a mode means they came to describe a situation: ambiguous messages go to the guided
+      // flow. Direct questions ("What is Orbit?") are still recognised and answered from the documents.
+      routeMessage(message, { fallback: flow.stage === 'START' && !body.mode ? 'factual' : 'personal' });
 
   const produce = async (): Promise<Produced> => {
     if (route.kind === 'personal') {

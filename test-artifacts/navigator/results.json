@@ -1,0 +1,162 @@
+[
+  {
+    "name": "A1: third person, one question, 2–4 quick replies",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A1: context extracted (helper, 19, healthcare, GED, foster youth)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A1: narrowing counts are real (listing total equals the JobListing table)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A2: context updated; the next question is a different one",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A3: results with role-based job matches (healthcare field)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A3: every job card traces to its listing, document, chunks and Qdrant points",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A3: text citations map to indexed chunks",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A3: no invented GED or healthcare-training program; gaps stated",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "A3: no eligibility claimed",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "B1: second person; experience recognised as a role",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "B2: related roles found without the word \"solar\" in the listings (electrician / lighting technician)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "B2: related roles are not presented as role matches",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "B2: role search shows the widening",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "B2: job cards verified against PostgreSQL and Qdrant",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "C: duties without a title → caregiver role recognised and matched",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "C: matched listings verified, none fabricated",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "D: \"What is Orbit?\" → direct cited answer, no questionnaire",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "E: no invented listings; the gap is explained",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "F: correction updates context (career and location) and re-runs matching",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "F: results change with the new preference (healthcare listing appears)",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: mode selection offers both modes",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: header shows mode, Start over and Leave",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: one question with 2–4 quick-reply buttons and a See Results button",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: sidebar \"What I know so far\" shows the extracted facts",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: narrowing shows real counts",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: user bubble is gold, right-aligned",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: quick reply sends its answer",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: results render in reference groups with job cards",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: expanded card shows requirements, source and the not-a-confirmed-opening caveat",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: no \"Assuming from what you've told me\" box",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: no unexpected console errors",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "G: mobile — no horizontal overflow; sidebar collapses into a drawer",
+    "ok": true,
+    "detail": ""
+  }
+]

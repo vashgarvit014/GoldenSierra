@@ -157,6 +157,7 @@ model Document {
   chunks   DocumentChunk[]
   versions DocumentVersion[]
   programs ProgramDocument[]
+  jobListings JobListing[]
 
   @@unique([url, language])
   @@index([status])
@@ -530,4 +531,41 @@ model EvalRun {
   createdAt DateTime @default(now())
 
   @@index([caseId, createdAt])
+}
+
+// ─────────────────────────── Job listings ─────────────────────────────
+
+/// One job listing extracted from an indexed document that tabulates vacancies.
+/// Every field is copied verbatim from that listing's own text (`segment`), so a salary or employer
+/// can never come from a neighbouring listing. Rebuilt by `npm run jobs:extract`; the source
+/// Document and its chunks are never modified.
+model JobListing {
+  id             String   @id @default(cuid())
+  documentId     String
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  ordinal        Int
+  title          String
+  employer       String?
+  county         String?
+  location       String?  @db.Text
+  requiredSkills String?  @db.Text
+  qualifications String?  @db.Text
+  salary         String?
+  employmentType String?  @db.Text
+  datePosted     String?
+  deadline       String?
+  summary        String?  @db.Text
+  sourceUrl      String?
+  applyUrl       String?
+  contact        String?  @db.Text
+  /// Occupation keys from the taxonomy (src/lib/jobs/occupations.ts), assigned deterministically.
+  occupations    String[] @default([])
+  sector         String?
+  /// The listing's verbatim text in the source document; every field above appears in it.
+  segment        String   @db.Text
+  segmentHash    String
+  extractedAt    DateTime @default(now())
+
+  @@unique([documentId, ordinal])
+  @@index([documentId])
 }
