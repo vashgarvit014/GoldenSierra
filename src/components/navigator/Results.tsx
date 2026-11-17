@@ -52,20 +52,48 @@ function RecommendationDetails({ job }: { job: JobMatch }) {
           {job.summary}
         </div>
       )}
-      {job.requirements.length > 0 && (
-        <div>
-          <h4>Published requirements</h4>
-          {job.requirements.map((r) => (
-            <div className={s.req} key={r.text}>
+      <div data-testid="requirements">
+        <h4>Published requirements vs. what was shared</h4>
+        {job.requirements.length === 0 && <p className={s.caveat}>This listing publishes no education, experience or certification requirements.</p>}
+        {job.requirements.map((r) => (
+          <div className={s.reqBlock} key={r.text} data-status={r.status} data-mandatory={r.mandatory}>
+            <div className={s.req}>
               <span className={r.status === 'met' ? s.reqMet : r.status === 'unmet' ? s.reqUnmet : s.reqUnknown} aria-label={r.status}>
-                {r.status === 'met' ? '✓' : r.status === 'unmet' ? '✕' : '?'}
+                {r.informational ? 'ⓘ' : r.status === 'met' ? '✓' : r.status === 'unmet' ? '✕' : '?'}
               </span>
-              <span>{r.text}</span>
+              <span>
+                <span className={s.reqTag}>{r.informational ? 'Note' : r.mandatory ? 'Required' : 'Preferred'}</span> {r.text}
+                {r.alternatives ? <span className={s.caveat}> (any one of {r.alternatives} ways)</span> : null}
+              </span>
             </div>
-          ))}
-          <p className={s.caveat}>✓ / ✕ compare the listing with what was shared in this conversation; ? means not known yet. The employer decides.</p>
+            <div className={s.reqCompare}>{r.comparison}</div>
+            <div className={s.reqSource} data-testid="requirement-source" data-chunks={r.source.chunkIds.join(',')}>
+              Source: {job.source.title}, listing “{r.source.field === 'qualifications' ? 'Eligibility / minimum qualifications' : 'Required skills'}” · {r.source.chunkIds.length} indexed passage{r.source.chunkIds.length === 1 ? '' : 's'}
+            </div>
+          </div>
+        ))}
+      </div>
+      {job.qualification.missing.length > 0 && (
+        <div data-testid="missing-qualifications">
+          <h4>Missing qualifications (as shared)</h4>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {job.qualification.missing.map((m) => (
+              <li key={m}>{m}</li>
+            ))}
+          </ul>
         </div>
       )}
+      {job.access && (
+        <div>
+          <h4>Getting there</h4>
+          {job.access}
+        </div>
+      )}
+      <div data-testid="verification-status">
+        <h4>Verification status</h4>
+        Requirements are copied from the indexed listing and compared only with what was shared in this conversation.
+        ✓ met · ✕ not met (stated) · ? not known yet. This is not an eligibility or hiring decision — the employer decides.
+      </div>
       {job.requiredSkills && (
         <div>
           <h4>Skills the listing asks for</h4>
@@ -96,6 +124,20 @@ function RecommendationDetails({ job }: { job: JobMatch }) {
   );
 }
 
+function QualificationBadge({ job }: { job: JobMatch }) {
+  const q = job.qualification;
+  const text =
+    q.fit === 'no_published_requirements' ? 'No published education, experience or certification requirements'
+      : q.fit === 'meets_published' ? `Meets all ${q.mandatory} published requirement${q.mandatory === 1 ? '' : 's'}, based on what was shared`
+        : q.fit === 'gaps' ? `Missing ${q.unmet} required qualification${q.unmet === 1 ? '' : 's'}${q.unknown ? ` · ${q.unknown} to confirm` : ''}`
+          : `${q.met} of ${q.mandatory} required qualifications confirmed · ${q.unknown} not known yet`;
+  return (
+    <div className={`${s.qualBadge} ${q.fit === 'gaps' ? s.qualGap : q.fit === 'meets_published' ? s.qualMet : ''}`} data-testid="qualification-badge" data-fit={q.fit}>
+      {text}
+    </div>
+  );
+}
+
 export function JobMatchCard({ job }: { job: JobMatch }) {
   const [open, setOpen] = useState(false);
   return (
@@ -122,6 +164,7 @@ export function JobMatchCard({ job }: { job: JobMatch }) {
           </ul>
         </div>
       )}
+      <QualificationBadge job={job} />
       <div className={`${s.status} ${job.listingStatus === 'closed' ? s.statusClosed : s.statusOpen}`}>{job.listingStatusLabel}</div>
       <div className={s.links}>
         {job.applyUrl && (
@@ -168,7 +211,7 @@ export const TrainingProgramCard = (p: { rec: Recommendation; citations: Citatio
 export const SupportServiceCard = (p: { rec: Recommendation; citations: Citation[] }) => <ProgramCard {...p} kind="support" />;
 
 export function RecommendationResults({ results, citations, they }: { results: NavigatorResults; citations: Citation[]; they: string }) {
-  const any = results.bestJobs.length + results.relatedJobs.length + results.training.length + results.support.length > 0;
+  const any = results.bestJobs.length + results.relatedJobs.length + (results.gapJobs?.length ?? 0) + results.training.length + results.support.length > 0;
   return (
     <section className={s.results} data-testid="results">
       {results.roleSearch.own.length > 0 && (
@@ -189,6 +232,13 @@ export function RecommendationResults({ results, citations, they }: { results: N
           <h3>Related job opportunities</h3>
           <p className={s.groupNote}>Related roles, transferable skills or the same field — they may ask for more than {they} have shared.</p>
           <div className={s.cards}>{results.relatedJobs.map((j) => <JobMatchCard key={j.id} job={j} />)}</div>
+        </div>
+      )}
+      {(results.gapJobs?.length ?? 0) > 0 && (
+        <div className={s.group} data-testid="group-gaps">
+          <h3>Openings that need a qualification first</h3>
+          <p className={s.groupNote}>Related to the roles described, but the listing requires something {they} said {they === 'you' ? "you don't" : "they don't"} have yet.</p>
+          <div className={s.cards}>{results.gapJobs!.map((j) => <JobMatchCard key={j.id} job={j} />)}</div>
         </div>
       )}
       {results.training.length > 0 && (

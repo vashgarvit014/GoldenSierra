@@ -134,11 +134,12 @@ const questions = (s: string) => (s.match(/\?/g) ?? []).length;
 
     // ── Scenario B: direct factual lookup (fresh session, and mid-conversation) ──
     const b = await session();
-    const b1 = await b('What is Orbit?');
+    // (The Orbit documents were archived in the knowledge base on 2026-11-17; a still-indexed topic is used.)
+    const b1 = await b('What is the Elevate program?');
     const vb = await verifyCitations(b1);
-    check('B: "What is Orbit?" → direct cited answer, no questionnaire', b1.payload.flow?.route === 'factual' && b1.payload.flow.question === null && b1.payload.flow.quickReplies.length === 0 && /orbit/i.test(b1.answer) && vb.ok, `${vb.why} ${b1.answer.slice(0, 200)}`);
-    check('B: citations point at Orbit documents', b1.payload.citations.every((c) => /orbit/i.test(`${c.title} ${c.url}`)), JSON.stringify(b1.payload.citations.map((c) => c.url)));
-    const bMid = await a('What is Orbit?');
+    check('B: "What is the Elevate program?" → direct cited answer, no questionnaire', b1.payload.flow?.route === 'factual' && b1.payload.flow.question === null && b1.payload.flow.quickReplies.length === 0 && /elevate/i.test(b1.answer) && vb.ok, `${vb.why} ${b1.answer.slice(0, 200)}`);
+    check('B: citations point at indexed Golden Sierra documents', b1.payload.citations.length > 0 && b1.payload.citations.every((c) => /goldensierra\.com/i.test(c.url ?? '')), JSON.stringify(b1.payload.citations.map((c) => c.url)));
+    const bMid = await a('What is the Elevate program?');
     check('B: a factual question mid-conversation is answered directly and leaves the guided state intact', bMid.payload.flow?.route === 'factual' && bMid.payload.flow.stage === 'FOLLOW_UP' && /Healthcare/.test(bMid.payload.flow.knownFacts.careerInterest ?? '') && bMid.payload.citations.length > 0, JSON.stringify(bMid.payload.flow));
 
     // ── Scenario C: unsupported ──

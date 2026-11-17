@@ -13,7 +13,9 @@ import { GENERATION_FAILED_TEXT, NO_ANSWER_TEXT } from '../rag/strict';
 import { completeAnswer } from '../ai/complete';
 import { cardsFromCitations, prepareGuidedResults, type Focus } from './evidence';
 import { jobVerdicts, loadListings, matchJobs, roleProfile, scoreListings, type ListingRow } from '../jobs/match';
-import { OCCUPATION_BY_KEY } from '../jobs/occupations';
+import { OCCUPATION_BY_KEY, SECTOR_LABELS, type Sector } from '../jobs/occupations';
+import { answerToPending, qualificationQuestion } from './qualify';
+import { certLabel, educationFacts } from '../jobs/requirements';
 import type { JobMatch, NarrowingCounts, NavigatorResults } from '@/types/navigator';
 import type { Recommendation } from '@/types/chat';
 import { SUBJECT, type CounselorContext, type ProgramMatch, type QuickReply } from '@/types/counselor';
@@ -48,6 +50,8 @@ const FlowStateSchema = z.object({
   context: z.object({ mode: z.enum(['self', 'helper']), population: z.array(z.string()), barriers: z.array(z.string()) }).passthrough(),
   askedQuestions: z.array(z.string()).max(50),
   pendingQuestion: z.string().nullable(),
+  preResultsAsked: z.boolean().optional(),
+  resultsRequested: z.boolean().optional(),
 });
 
 /** The validated response contract for the structured part of every admin-chat turn. */
@@ -104,6 +108,21 @@ export function knownFactsRecord(ctx: CounselorContext): Record<string, string> 
   if (ctx.occupations?.length) out.desiredRole = roles(ctx.occupations);
   if (ctx.experience?.length) out.experience = roles(ctx.experience);
   if (ctx.rolePreference) out.rolePreference = { technical: 'Hands-on technical work', supervisory: 'Supervisory or lead roles', both: 'Technical or supervisory' }[ctx.rolePreference];
+  // Qualifications as stated — "not stated" items are simply absent (unknown), never shown as missing.
+  const q = ctx.quals ?? {};
+  const edu = educationFacts(ctx);
+  if (q['edu:bachelor']?.status === 'has') out.degree = "Bachelor's degree";
+  else if (q['edu:associate']?.status === 'has') out.degree = 'College / associate degree';
+  else if (edu[2] === 'absent' && edu[1] !== 'absent') out.degree = 'No college degree';
+  const has = Object.entries(q).filter(([k, v]) => k.startsWith('cert:') && v.status === 'has').map(([k]) => certLabel(k.slice(5)));
+  const lacks = Object.entries(q).filter(([k, v]) => k.startsWith('cert:') && v.status === 'absent').map(([k]) => certLabel(k.slice(5)));
+  if (has.length || lacks.length) out.certifications = [...has, ...lacks.map((l) => `no ${l}`)].join('; ').slice(0, 120);
+  const yrs = (f: { min: number; max: number }) => (f.max >= 50 ? `${f.min}+ years` : f.min === f.max ? `${f.min} year${f.min === 1 ? '' : 's'}` : `${f.min}–${f.max} years`);
+  const exp = Object.entries(q)
+    .filter(([k]) => k.startsWith('exp:'))
+    .map(([k, v]) => `${k === 'exp:any' ? 'work' : k === 'exp:supervisory' ? 'supervisory' : SECTOR_LABELS[k.slice(4) as Sector]?.toLowerCase() ?? k.slice(4)}: ${v.status === 'absent' ? 'none' : v.years ? yrs(v.years) : 'yes'}`);
+  if (exp.length) out.experienceYears = exp.join('; ').slice(0, 120);
+  if (ctx.currentTraining) out.currentTraining = ctx.currentTraining;
   return out;
 }
 
@@ -259,7 +278,8 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
 
   // ── UNDERSTAND ──
   const { updates } = await extractContext(input.message, before, history);
-  const ctx = mergeContext(before, updates);
+  // A short reply ("Yes", "2-4 years") is read against the qualification question it answers.
+  const ctx = mergeContext(mergeContext(before, updates), answerToPending(input.flow.pendingQuestion, input.message));
   const corrections = changedFields(before, ctx);
   const beforeFacts = knownFactsRecord(before);
   const nowFacts = knownFactsRecord(ctx);
@@ -286,12 +306,34 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   const jobs = listings.length ? jobVerdicts(listings) : undefined;
   const narrowing = narrowingCounts(ctx, matchPrograms(programs, ctx), listings);
   const asked = input.flow.askedQuestions;
-  const early = Boolean(input.forceResults) || wantsResults(input.message);
+  // Qualification gaps come from the published requirements of the listings that currently fit best.
+  const scored = scoreListings(listings, ctx);
+  const qual = qualificationQuestion(ctx, scored, asked);
+  const early = Boolean(input.forceResults) || wantsResults(input.message) || Boolean(input.flow.resultsRequested);
+  const anyway = /\b(anyway|skip|just show|without answering)\b/i.test(input.message);
+
+  // ── "See Results" with a requirement-deciding detail missing: one optional, targeted question ──
+  if (early && !hadResults && qual && !input.flow.preResultsAsked && !anyway && !input.flow.resultsRequested) {
+    const stage = transition(input.flow.stage, { type: 'ASK', knownCount: Object.keys(nowFacts).length });
+    path.push(stage);
+    const base = qual.question.prompt(ctx.mode, ctx).replace(/\s+/g, ' ').trim();
+    const question = `Before I show results — one detail would make them more accurate. ${base}`;
+    const flow: FlowState = { stage, context: ctx, askedQuestions: [...asked, qual.question.id], pendingQuestion: qual.question.id, preResultsAsked: true, resultsRequested: true };
+    const payload = basePayload(started, {
+      stage, route: 'personal', question,
+      quickReplies: [...qual.question.quickReplies(ctx.mode).slice(0, 3), { label: 'Show results anyway', value: 'Show results anyway' }],
+      knownFacts: nowFacts, uncertainties: [], canShowResults: false, corrections,
+    });
+    payload.navigator = { narrowing };
+    return { answer: question, payload, flow, prepared: null, path };
+  }
+
   const ready =
     early ||
     (hadResults && contextChanged) ||
     asked.length >= MAX_CLARIFYING ||
-    readyForResults(ctx, matches, asked, programs, jobs);
+    // Not while a mandatory requirement of a shortlisted listing hinges on something we can still ask.
+    (readyForResults(ctx, matches, asked, programs, jobs) && !qual);
   // Never put the same question twice in a row: if the reply answered something else, move on to the
   // next most useful question; if nothing else is worth asking, show results rather than badger.
   const pending = input.flow.pendingQuestion;
@@ -299,7 +341,8 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   // …except a decisive question the reply left unanswered, which is put once more (it is the one that
   // separates job-search help from training), acknowledging what they did say first.
   const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked, programs, jobs) : null;
-  const choice = fresh ?? (reask?.question.id === pending ? reask : null);
+  // Missing information that decides a MANDATORY requirement of a shortlisted listing comes first.
+  const choice = !ready && qual ? { question: qual.question, gain: 1 } : fresh ?? (reask?.question.id === pending ? reask : null);
   const subject = SUBJECT[ctx.mode];
 
   // ── CLARIFY ──
@@ -308,7 +351,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     path.push(stage);
     const base = choice.question.prompt(ctx.mode, ctx).replace(/\s+/g, ' ').trim();
     const question = choice === reask ? `One thing would still help most: ${base.charAt(0).toLowerCase()}${base.slice(1)}` : base;
-    const lead = await acknowledge({ ctx, message: input.message, newFacts, corrections, next: WHY[choice.question.id], history });
+    const lead = await acknowledge({ ctx, message: input.message, newFacts, corrections, next: WHY[choice.question.id] ?? 'Published job requirements depend on this, so it changes which listings are a real fit.', history });
     const answer = `${lead}\n\n${question}`;
     const flow: FlowState = { stage, context: ctx, askedQuestions: [...asked, choice.question.id], pendingQuestion: choice.question.id };
     const payload = basePayload(started, {
@@ -328,10 +371,13 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   const stage = transition(ready1, { type: 'RESULTS_SHOWN', hadResults });
   path.push(stage);
 
-  const uncertainties = uncertaintiesFor(ctx);
-  // One refinement question at most, and only one that has not been asked twice already.
+  // What is still unknown: general dimensions, plus the facts that decide shortlisted listings' mandatory requirements.
+  const qualUnknowns = [...qualificationGapsLabels(ctx, scored)];
+  const uncertainties = [...new Set([...qualUnknowns, ...uncertaintiesFor(ctx)])].slice(0, 5);
+  // One refinement question at most: a qualification gap first, then a general one not asked twice already.
   const nextRefine = uncertainties.length ? selectNextQuestion(ctx, matches, asked, programs, jobs) : null;
-  const refine = nextRefine && uncertainties.includes(UNCERTAINTY[nextRefine.question.id] ?? '') ? nextRefine : null;
+  const general = nextRefine && uncertainties.includes(UNCERTAINTY[nextRefine.question.id] ?? '') ? nextRefine : null;
+  const refine = qual ? { question: qual.question } : general;
   const { answer, done, prepared, recommendations, answered, focuses, navigator } = await verifiedResults({
     ctx, message: input.message, extra, started, corrections, uncertainties, refine: refine?.question.prompt(ctx.mode, ctx) ?? null, jobs: true,
   });
@@ -339,6 +385,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     stage, context: ctx,
     askedQuestions: refine ? [...asked, refine.question.id] : asked,
     pendingQuestion: refine?.question.id ?? null,
+    preResultsAsked: input.flow.preResultsAsked,
   };
   const payload: AssistantPayload = {
     ...done.payload,
@@ -386,25 +433,40 @@ export async function verifiedResults(a: {
   const citedChunks = new Set(done.payload.citations.flatMap((c) => c.chunkIds ?? []));
   const covered = new Set([...citedChunks].map((id) => focusOf.get(id)?.key).filter(Boolean));
   const open = jobs.matches.filter((m) => m.listingStatus !== 'closed');
-  const bestJobs = open.filter((m) => m.kind === 'exact').slice(0, 4);
-  const relatedJobs = open.filter((m) => m.kind !== 'exact').slice(0, 4);
+  // A listing with a mandatory published requirement they said they don't meet is never a "best match",
+  // however close the occupation: it is shown separately, with what is missing.
+  const fits = open.filter((m) => m.qualification.unmet === 0);
+  const bestJobs = fits.filter((m) => m.kind === 'exact').slice(0, 4);
+  const relatedJobs = fits.filter((m) => m.kind !== 'exact').slice(0, 4);
+  const gapJobs = open.filter((m) => m.qualification.unmet > 0).slice(0, 4);
   // Job listings are matched structurally (above), so a "finding work" or career need they answer is covered.
-  if (bestJobs.length + relatedJobs.length) covered.add('work').add('career');
+  if (bestJobs.length + relatedJobs.length + gapJobs.length) covered.add('work').add('career');
   const uncovered = focuses.filter((f) => !covered.has(f.key)).map((f) => f.label);
   const answer = composeResults({
     ctx: a.ctx, focuses, verified: done.answer, answered, corrections: a.corrections, uncertainties: a.uncertainties,
-    uncovered: answered || bestJobs.length + relatedJobs.length ? uncovered : [], refine: a.refine,
-    jobs: a.jobs ? { best: bestJobs.length, related: relatedJobs.length, closed: jobs.matches.length - open.length, total: jobs.total } : undefined,
+    uncovered: answered || bestJobs.length + relatedJobs.length + gapJobs.length ? uncovered : [], refine: a.refine,
+    jobs: a.jobs ? { best: bestJobs.length, related: relatedJobs.length, gaps: gapJobs.length, closed: jobs.matches.length - open.length, total: jobs.total, unknown: [...bestJobs, ...relatedJobs].filter((m) => m.qualification.unknown > 0).length } : undefined,
   });
   const p = roleProfile(a.ctx);
   const isTraining = (r: Recommendation) => /training|scholarship|internship|metrix|learning|class/i.test(`${r.slug ?? ''} ${r.name}`);
   const navigator: NavigatorResults = {
-    bestJobs, relatedJobs,
+    bestJobs, relatedJobs, gapJobs,
     training: recommendations.filter(isTraining),
     support: recommendations.filter((r) => !isTraining(r)),
     roleSearch: { own: p.own.map((k) => OCCUPATION_BY_KEY.get(k)!.title), related: [...p.related.keys()].map((k) => OCCUPATION_BY_KEY.get(k)!.title) },
   };
   return { answer, done, prepared, recommendations, answered, focuses, navigator };
+}
+
+/** Plain-language names of facts that decide unknown mandatory requirements of the shortlist. */
+function qualificationGapsLabels(ctx: CounselorContext, scored: JobMatch[]): string[] {
+  const keys = new Set<string>();
+  for (const m of scored.filter((x) => x.listingStatus !== 'closed').slice(0, 5)) for (const r of m.requirements) if (r.mandatory && r.status === 'unknown') r.decidedBy.forEach((k) => keys.add(k));
+  return [...keys].map((k) =>
+    k === 'edu' ? (educationFacts(ctx)[1] === 'has' ? 'whether there is a college degree' : 'education level')
+      : k.startsWith('cert:') ? certLabel(k.slice(5))
+        : k === 'exp:supervisory' ? 'years of supervisory experience'
+          : k.startsWith('exp:') ? 'years of relevant experience' : 'age (18+)');
 }
 
 /**
@@ -435,7 +497,7 @@ export function composeResults(a: {
   uncovered?: string[];
   refine: string | null;
   /** Counts of role-matched indexed job listings (shown as cards beside the message). */
-  jobs?: { best: number; related: number; closed: number; total: number };
+  jobs?: { best: number; related: number; gaps?: number; closed: number; total: number; unknown?: number };
 }): string {
   const s = SUBJECT[a.ctx.mode];
   const join = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : xs[0] ?? '');
@@ -443,12 +505,12 @@ export function composeResults(a: {
   const parts: string[] = [];
   const updated = a.corrections.length ? "Thanks — I've updated that. " : '';
   const j = a.jobs;
-  const anyJobs = Boolean(j && j.best + j.related > 0);
+  const anyJobs = Boolean(j && j.best + j.related + (j.gaps ?? 0) > 0);
   const closedNote = j?.closed ? ` (${j.closed} more matched, but their deadlines have passed)` : '';
   const jobLine = !j
     ? null
     : anyJobs
-      ? `I also checked the ${j.total} indexed job listings: ${j.best ? `${j.best} ${j.best === 1 ? 'is' : 'are'} the kind of role ${s.pronoun} described` : `none is the exact role ${s.pronoun} described`}${j.related ? `, and ${j.related} ${j.related === 1 ? 'is a related role' : 'are related roles'}` : ''}${closedNote}. They are listed below with their sources.`
+      ? `I also checked the ${j.total} indexed job listings against ${s.possessive} role and the published requirements: ${j.best ? `${j.best} ${j.best === 1 ? 'is' : 'are'} the kind of role ${s.pronoun} described` : `none is the exact role ${s.pronoun} described with no requirement gap`}${j.related ? `, ${j.related} ${j.related === 1 ? 'is a related role' : 'are related roles'}` : ''}${j.gaps ? `, and ${j.gaps} ${j.gaps === 1 ? 'asks' : 'ask'} for a qualification ${s.pronoun} said ${s.pronoun === 'you' ? "you don't" : "they don't"} have yet` : ''}${closedNote}.${j.unknown ? ` For ${j.unknown} of the matches, some published requirements couldn't be checked against what ${s.pronoun} shared — each card shows which.` : ''} They are listed below with their sources.`
       : `I checked the ${j.total} indexed job listings and found none related to the roles ${s.pronoun} described${closedNote}.`;
   if (!a.answered) {
     parts.push(`${updated}I searched the indexed knowledge base for ${list}.`, a.verified === GENERATION_FAILED_TEXT ? GENERATION_FAILED_TEXT : NO_ANSWER_TEXT);

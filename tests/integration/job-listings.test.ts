@@ -48,4 +48,28 @@ describe('job listings', () => {
       expect(n.count).toBe(m.source.chunkIds.length);
     }
   });
+
+  it('every published requirement cites indexed chunks of its own document that exist in Qdrant', async () => {
+    const { matches } = await matchJobs({ mode: 'self', population: [], barriers: [], occupations: ['electrician', 'clerk', 'it_specialist', 'caregiver', 'lighting_technician', 'accounting_assistant', 'education_support'] });
+    const reqs = matches.flatMap((m) => m.requirements.map((r) => ({ m, r })));
+    expect(reqs.length).toBeGreaterThan(5);
+    for (const { m, r } of reqs) {
+      const chunks = await prisma.documentChunk.findMany({ where: { id: { in: r.source.chunkIds } } });
+      expect(chunks.length, `${m.title}: ${r.text}`).toBe(r.source.chunkIds.length);
+      expect(chunks.every((c) => c.documentId === m.source.documentId)).toBe(true);
+      const n = await getQdrant().count(env.QDRANT_COLLECTION, { exact: true, filter: { must: [{ key: 'chunkId', match: { any: r.source.chunkIds } }] } });
+      expect(n.count).toBe(r.source.chunkIds.length);
+      // With nothing stated, no requirement can be "unmet": missing information is unknown.
+      expect(r.status === 'unmet').toBe(false);
+    }
+  });
+
+  it('the REAL fixtures used by the unit tests are the indexed qualification texts, verbatim', async () => {
+    const rows = await prisma.jobListing.findMany({ select: { title: true, qualifications: true } });
+    const q = (t: string) => rows.find((r) => r.title === t)?.qualifications;
+    expect(q('Administrative Legal Clerk - Entry')).toBe("2 years of clerical experience; equivalent to completion of 12th grade; may need a valid driver's license");
+    expect(q('Electrician')).toBe("5-yr accredited electrical apprenticeship OR 5 yrs full-time experience as an electrician; valid CA Class C+ driver's license");
+    expect(q('In-Home Senior Care (Caregiver)')).toBe('No formal eligibility listed. Caregiverlist 8-hour elearning certification provided after hire.');
+    expect(q('Information Technology Specialist - Senior')).toBe("2 yrs journey-level IT experience; Associate's degree in CS/IT (or equivalent experience/certs); Bachelor's desirable; may need a driver's license");
+  });
 });

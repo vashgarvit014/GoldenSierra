@@ -1,0 +1,102 @@
+[
+  {
+    "name": "1: education unknown → the next question asks for it, because shortlisted listings publish an education requirement",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "1: with education unknown, the degree requirement is UNKNOWN — not unmet — and the card is not in the gap group",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "2: no diploma vs \"equivalent to completion of 12th grade\" → unmet, listed as missing, in \"needs a qualification first\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "8: caregiver listing (no published education requirement) — no GED does not count against it; stays a best/related match",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "8: and no education question was asked for it before results",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "9: helper mode — qualification wording in the third person",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "3: entry-level clerk role → no degree question; the published experience requirement is asked about",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "3: 12th-grade requirement met by high school; 2 yrs clerical met by \"2-4 years\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "5: electrician — 6 stated years and a license meet every published requirement; listed as a best match",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "6/sidebar: experience and license appear in \"What I know so far\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "6: correction — 2 years → unmet (gap group); corrected to 6 years → met, re-ranked as FOLLOW_UP",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "7: See Results with a requirement-deciding gap → one targeted question + \"Show results anyway\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "7: \"Show results anyway\" → results; unknown requirements stay unknown and are named",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "7: related-trade experience is not proof — electrician experience requirement stays unknown for a solar installer",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "10: every requirement is verbatim in its listing and cites PostgreSQL chunks present in Qdrant",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "no card claims eligibility or hiring approval",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Browser: sidebar shows experience years and degree status",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Browser: electrician with 2 stated years appears under \"Openings that need a qualification first\"",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Browser: expanded card shows requirements vs. stated facts, missing qualifications, sources and verification status",
+    "ok": true,
+    "detail": ""
+  },
+  {
+    "name": "Browser: no assumption alert",
+    "ok": true,
+    "detail": ""
+  }
+]

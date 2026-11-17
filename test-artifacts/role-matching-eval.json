@@ -9,11 +9,11 @@
       "fn": 4
     },
     "vector": {
-      "precision": 0.8,
+      "precision": 0.67,
       "recall": 0.36,
-      "falsePositives": 1,
+      "falsePositives": 2,
       "tp": 4,
-      "fp": 1,
+      "fp": 2,
       "fn": 7
     },
     "role": {
@@ -43,8 +43,8 @@
       "keyword": [],
       "vector": [],
       "role": [
-        "Traffic Control & Lighting Technician I/II",
-        "Electrician"
+        "Electrician",
+        "Traffic Control & Lighting Technician I/II"
       ],
       "res": {
         "keyword": {
@@ -120,8 +120,8 @@
       ],
       "role": [
         "Accounting Assistant",
-        "Administrative Legal Clerk - Entry",
         "Administrative Services Officer I",
+        "Administrative Legal Clerk - Entry",
         "Executive Assistant"
       ],
       "res": {
@@ -310,7 +310,9 @@
         "Administrative Services Officer I",
         "Electrician"
       ],
-      "vector": [],
+      "vector": [
+        "Housekeeping Manager"
+      ],
       "role": [
         "Administrative Legal Clerk - Entry",
         "Administrative Services Officer I",
@@ -325,7 +327,7 @@
         },
         "vector": {
           "tp": 0,
-          "fp": 0,
+          "fp": 1,
           "fn": 2
         },
         "role": {

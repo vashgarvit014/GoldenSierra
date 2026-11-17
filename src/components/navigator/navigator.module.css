@@ -120,3 +120,11 @@
   .sideToggle { margin-right: auto; }
   .cards { grid-template-columns: minmax(0, 1fr); }
 }
+
+.reqBlock { padding: 6px 0; border-bottom: 1px dashed var(--gs-canvas); }
+.reqTag { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--gs-tobacco); margin-right: 4px; }
+.reqCompare { margin: 2px 0 0 18px; color: var(--gs-dark); }
+.reqSource { margin: 2px 0 0 18px; font-size: 11px; color: var(--muted-foreground); }
+.qualBadge { font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 8px; background: var(--gs-canvas); color: var(--gs-dark); }
+.qualMet { background: var(--success-soft); color: var(--success-strong); }
+.qualGap { background: #fdecee; color: #8a1c27; }

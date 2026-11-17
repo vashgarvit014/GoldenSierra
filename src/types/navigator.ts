@@ -8,9 +8,33 @@ export type ListingStatus = 'open_until' | 'open_until_filled' | 'closed' | 'unk
 export type JobRequirement = {
   /** Verbatim from the listing. */
   text: string;
-  about: 'education' | 'education_preferred' | 'license' | 'experience' | 'certification' | 'location' | 'other';
+  about: 'education' | 'experience' | 'certification' | 'age' | 'other';
+  /** False for "preferred" / "desirable" items and for things provided after hire. */
+  mandatory: boolean;
+  /** "Provided after hire": shown, never a prerequisite. */
+  informational?: boolean;
+  /** Number of alternative ways to meet it ("… OR …"), when more than one. */
+  alternatives?: number;
   /** Against what the user has told us: met, not met, or not known yet. Never an eligibility decision. */
   status: 'met' | 'unmet' | 'unknown';
+  /** What the user has said that bears on it, in plain words. */
+  comparison: string;
+  educationLevel?: string;
+  /** Facts that would decide it (edu, exp:<sector>, cert:<slug>, age) — used to choose questions. */
+  decidedBy: string[];
+  /** Where the requirement is published: the listing column and the indexed chunks that contain it. */
+  source: { field: 'qualifications' | 'requiredSkills'; chunkIds: string[] };
+};
+
+export type QualificationSummary = {
+  published: number;
+  mandatory: number;
+  met: number;
+  unmet: number;
+  unknown: number;
+  /** Mandatory requirements they have said they don't meet (verbatim). */
+  missing: string[];
+  fit: 'meets_published' | 'incomplete' | 'gaps' | 'no_published_requirements';
 };
 
 export type JobMatch = {
@@ -25,6 +49,9 @@ export type JobMatch = {
   reasons: string[];
   skillsAlignment: string[];
   requirements: JobRequirement[];
+  qualification: QualificationSummary;
+  /** Getting there: listing location vs. where they are and their transport (not a published requirement). */
+  access: string | null;
   salary: string | null;
   employmentType: string | null;
   summary: string | null;
@@ -50,6 +77,8 @@ export type NarrowingCounts = {
 export type NavigatorResults = {
   bestJobs: JobMatch[];
   relatedJobs: JobMatch[];
+  /** Listings with a mandatory published requirement they said they don't meet. */
+  gapJobs: JobMatch[];
   training: Recommendation[];
   support: Recommendation[];
   /** Roles searched: what they have/want, and the related roles the search was widened to. */

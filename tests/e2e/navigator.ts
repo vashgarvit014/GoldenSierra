@@ -42,6 +42,11 @@ async function session(mode: 'self' | 'helper') {
   };
 }
 
+/** "See Results"; if one optional qualification question comes back first, answer "Show results anyway". */
+async function results(say: (m: string, f?: boolean) => Promise<Turn>): Promise<Turn> {
+  const t = await say('Show me the options you have so far', true);
+  return t.payload.flow?.stage === 'CLARIFYING' || t.payload.flow?.stage === 'DISCOVERING_NEEDS' ? say('Show results anyway') : t;
+}
 const jobsOf = (t: Turn): JobMatch[] => [...(t.payload.navigator?.results?.bestJobs ?? []), ...(t.payload.navigator?.results?.relatedJobs ?? [])];
 const questions = (s: string) => (s.match(/\?/g) ?? []).length;
 
@@ -56,7 +61,12 @@ async function verifyJobs(jobs: JobMatch[]): Promise<{ ok: boolean; why: string 
     for (const [k, v] of Object.entries({ title: j.title, employer: j.employer, county: j.county, salary: j.salary, summary: j.summary, deadline: j.deadline })) {
       if (v && !squash(row.segment).includes(squash(v))) return { ok: false, why: `${j.title}: ${k} "${v}" not in its own listing` };
     }
-    for (const r of j.requirements.filter((x) => x.about !== 'location')) if (!squash(row.segment).includes(squash(r.text))) return { ok: false, why: `${j.title}: requirement "${r.text}" not in listing` };
+    for (const r of j.requirements) {
+      if (!squash(row.segment).includes(squash(r.text))) return { ok: false, why: `${j.title}: requirement "${r.text}" not in listing` };
+      // Each requirement cites indexed chunks of the same document.
+      const rc = await prisma.documentChunk.findMany({ where: { id: { in: r.source.chunkIds } } });
+      if (!rc.length || rc.some((c) => c.documentId !== row.documentId)) return { ok: false, why: `${j.title}: requirement "${r.text}" has no source chunk` };
+    }
     if (!j.source.chunkIds.length) return { ok: false, why: `${j.title}: no cited chunk` };
     const chunks = await prisma.documentChunk.findMany({ where: { id: { in: j.source.chunkIds } } });
     if (chunks.length !== j.source.chunkIds.length || !chunks.every((c) => c.documentId === row.documentId && squash(c.content).includes(squash(j.title)))) return { ok: false, why: `${j.title}: cited chunk mismatch` };
@@ -103,7 +113,7 @@ async function verifyCitations(t: Turn): Promise<{ ok: boolean; why: string }> {
     const b1 = await b('I have experience installing solar panels and want a better job.');
     const fb = b1.payload.flow!;
     check('B1: second person; experience recognised as a role', /\byou(r)?\b/i.test(b1.answer) && /Solar/i.test(fb.knownFacts.experience ?? ''), `${b1.answer} ${JSON.stringify(fb.knownFacts)}`);
-    const b2 = await b('Show me the options you have so far', true);
+    const b2 = await results(b);
     const jb = jobsOf(b2);
     check('B2: related roles found without the word "solar" in the listings (electrician / lighting technician)', jb.some((j) => j.kind === 'related' && /electrician|lighting/i.test(j.title)) && jb.every((j) => !/solar/i.test(j.title)), JSON.stringify(jb.map((j) => `${j.kind}:${j.title}`)));
     check('B2: related roles are not presented as role matches', (b2.payload.navigator?.results?.bestJobs ?? []).every((j) => j.kind === 'exact'), '');
@@ -114,7 +124,7 @@ async function verifyCitations(t: Turn): Promise<{ ok: boolean; why: string }> {
     // ── C: no job title, only duties ──
     const c = await session('self');
     await c('For five years I helped elderly people at home with bathing, dressing and meal preparation.');
-    const c2 = await c('Show me the options you have so far', true);
+    const c2 = await results(c);
     const jc = jobsOf(c2);
     check('C: duties without a title → caregiver role recognised and matched', (c2.payload.navigator?.results?.bestJobs ?? []).some((j) => /caregiver/i.test(j.title)), JSON.stringify(jc.map((j) => `${j.kind}:${j.title}`)));
     const vc = await verifyJobs(jc);
@@ -122,20 +132,21 @@ async function verifyCitations(t: Turn): Promise<{ ok: boolean; why: string }> {
 
     // ── D: direct factual query ──
     const d = await session('self');
-    const d1 = await d('What is Orbit?');
+    // (The Orbit documents were archived in the knowledge base on 2026-11-17; a still-indexed topic is used.)
+    const d1 = await d('What is the Elevate program?');
     const vd = await verifyCitations(d1);
-    check('D: "What is Orbit?" → direct cited answer, no questionnaire', d1.payload.flow?.route === 'factual' && !d1.payload.flow.quickReplies.length && /orbit/i.test(d1.answer) && d1.payload.citations.length > 0 && vd.ok, d1.answer.slice(0, 200));
+    check('D: "What is the Elevate program?" → direct cited answer, no questionnaire', d1.payload.flow?.route === 'factual' && !d1.payload.flow.quickReplies.length && /elevate/i.test(d1.answer) && d1.payload.citations.length > 0 && vd.ok, d1.answer.slice(0, 200));
 
     // ── E: unsupported role ──
     const e = await session('self');
     await e('I want to work as a deep sea saturation diver.');
-    const e2 = await e('Show me the options you have so far', true);
+    const e2 = await results(e);
     check('E: no invented listings; the gap is explained', jobsOf(e2).length === 0 && /none related|couldn't find enough information|didn't find indexed information/i.test(e2.answer) && !/saturation diver[^.]*\[\d+\]/i.test(e2.answer), e2.answer);
 
     // ── F: correction ──
     const f = await session('self');
     await f('I worked as a bookkeeper doing QuickBooks and invoices, and I live in Roseville.');
-    const fr = await f('Show me the options you have so far', true);
+    const fr = await results(f);
     const before = jobsOf(fr).map((j) => j.title);
     const fc = await f('Actually I want to move into healthcare work instead, and I moved to Placerville.');
     const after = jobsOf(fc).map((j) => j.title);

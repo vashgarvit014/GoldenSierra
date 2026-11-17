@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classify, classifyListing, relatedOf, skillsIn } from '@/lib/jobs/occupations';
 import { segmentListings, verbatim } from '@/lib/jobs/extract';
-import { listingStatus, requirementsFor, scoreListings, type ListingRow } from '@/lib/jobs/match';
+import { listingStatus, scoreListings, type ListingRow } from '@/lib/jobs/match';
 import { mergeContext, ruleExtract } from '@/lib/counselor/extract';
 import { QUESTIONS, selectNextQuestion } from '@/lib/counselor/questions';
 import { composeResults } from '@/lib/conversation/flow';
@@ -70,10 +70,10 @@ describe('role-based matching', () => {
     expect(scoreListings(rows, mergeContext(ctx(), ruleExtract('I want to be a deep sea saturation diver.', ctx())))).toEqual([]);
   });
   it('published requirements are compared with stated facts, and deadlines decide open/closed', () => {
-    const r = requirementsFor(rows[2]!, ctx({ education: 'no_hs_diploma' }));
-    expect(r).toEqual([
-      { text: 'HS diploma + 2 yrs experience', about: 'education', status: 'unmet' },
-      { text: "valid driver's license", about: 'license', status: 'unknown' },
+    const r = scoreListings(rows, ctx({ education: 'no_hs_diploma', occupations: ['executive_assistant'] })).find((m) => m.id === 'x')!.requirements;
+    expect(r.map((x) => [x.text, x.status, x.mandatory])).toEqual([
+      ['HS diploma + 2 yrs experience', 'unmet', true],
+      ["valid driver's license", 'unknown', true],
     ]);
     expect(listingStatus('2020-01-01').status).toBe('closed');
     expect(listingStatus('Open until filled (review 11/8/2026)').status).toBe('open_until_filled');
@@ -82,7 +82,7 @@ describe('role-based matching', () => {
   it('closed listings rank last; a different county with no transport is an unmet requirement', () => {
     const m = scoreListings(rows, ctx({ careerInterest: 'office work', county: 'Placer', transportation: 'none', occupations: ['executive_assistant', 'electrician'] }));
     expect(m.at(-1)!.listingStatus).toBe('closed');
-    expect(m.find((x) => x.id === 'e')!.requirements).toContainEqual({ text: 'Located in Sacramento County', about: 'location', status: 'unmet' });
+    expect(m.find((x) => x.id === 'e')!.access).toMatch(/^Located in Sacramento County — you said you have no reliable transportation/);
   });
 });
 
@@ -111,7 +111,7 @@ describe('role extraction and questions', () => {
 describe('results message with job counts', () => {
   it('states real counts, keeps the no-answer sentence for services, and never claims eligibility', () => {
     const m = composeResults({ ctx: ctx(), focuses: [{ key: 'career', label: 'solar training', query: 'q' }], verified: 'x', answered: false, corrections: [], uncertainties: [], refine: null, jobs: { best: 0, related: 2, closed: 1, total: 12 } });
-    expect(m).toContain('I also checked the 12 indexed job listings: none is the exact role you described, and 2 are related roles (1 more matched, but their deadlines have passed)');
+    expect(m).toContain('I also checked the 12 indexed job listings against your role and the published requirements: none is the exact role you described with no requirement gap, 2 are related roles (1 more matched, but their deadlines have passed).');
     expect(m).toContain("I couldn't find enough information about that in the currently indexed knowledge base.");
     expect(m).toMatch(/employer to decide/);
   });

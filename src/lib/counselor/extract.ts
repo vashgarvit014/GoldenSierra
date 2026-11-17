@@ -6,7 +6,8 @@ import { withTimeout } from '../errors';
 import { parseModelJson } from '../ai/json';
 import { structuredTokenBudget } from '../ai/prompts';
 import type { CounselorContext, PopulationTag } from '@/types/counselor';
-import { classify, skillsIn } from '../jobs/occupations';
+import { OCCUPATION_BY_KEY, classify, skillsIn } from '../jobs/occupations';
+import { extractQuals } from '../jobs/qualifications';
 
 /**
  * Context extraction for counselor mode.
@@ -162,6 +163,16 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
     // "Experience installing solar panels, wants a better job" names a past role, not a new target.
     if (wants && !did) out.occupations = roleHits;
   }
+  // ── Qualifications: degrees, certifications/licenses, years of experience (only when stated) ──
+  const pastSectors = [...new Set((out.experience ?? []).map((k) => OCCUPATION_BY_KEY.get(k)!.sector))];
+  const q = extractQuals(text, pastSectors);
+  if (Object.keys(q.quals).length) out.quals = q.quals;
+  if (q.currentTraining) out.currentTraining = q.currentTraining;
+  // Keep the coarse education field consistent with an explicit degree statement.
+  if (q.quals['edu:bachelor']?.status === 'has' || q.quals['edu:associate']?.status === 'has') out.education = 'degree';
+  else if (q.quals['edu:hs']?.status === 'has' && !out.education) out.education = 'ged_or_hs';
+  // "No college degree" says nothing about high school: don't let the word "degree" set a level.
+  if (q.quals['edu:associate']?.status === 'absent' && out.education === 'degree') delete out.education;
   const skills = skillsIn(text);
   if (skills.length) out.skills = skills;
   if (/\bsupervis|\blead (?:a |the )?(?:team|crew)|\bmanag(?:e|ing) (?:a team|people|staff)|\bsupervisory\b|\bcrew lead\b/i.test(text) && !/\b(not|no|don'?t want)\b.{0,20}supervis/i.test(text)) out.rolePreference = /\bboth\b/i.test(text) ? 'both' : 'supervisory';
@@ -322,7 +333,15 @@ export function mergeContext(
   updates: ContextUpdate,
 ): CounselorContext {
   const next: CounselorContext = { ...current };
-  const { withdrawn, ...fields } = updates;
+  const { withdrawn, quals, ...fields } = updates;
+  if (quals && Object.keys(quals).length) {
+    // A newly stated education level replaces earlier degree statements (a correction), then facts merge by key.
+    const base = { ...(current.quals ?? {}) };
+    if (fields.education || Object.keys(quals).some((k) => k.startsWith('edu:'))) for (const k of Object.keys(base)) if (k.startsWith('edu:') && !(k in quals)) delete base[k];
+    next.quals = { ...base, ...quals };
+  } else if (fields.education && fields.education !== current.education && current.quals) {
+    next.quals = Object.fromEntries(Object.entries(current.quals).filter(([k]) => !k.startsWith('edu:')));
+  }
   for (const [key, value] of Object.entries(fields) as [keyof CounselorContext, unknown][]) {
     if (value === undefined || value === null || value === '') continue;
     if (Array.isArray(value)) {
@@ -349,8 +368,10 @@ export function mergeContext(
 /** Scalar fields whose earlier value this turn replaced — a correction, not new information. */
 export function changedFields(before: CounselorContext, after: CounselorContext): string[] {
   const keys: (keyof CounselorContext)[] = ['age', 'county', 'city', 'careerInterest', 'education', 'employmentStatus', 'transportation', 'incomeUrgency', 'audience', 'rolePreference', 'occupations'];
+  // A qualification fact that flips (has ↔ absent) is a correction too.
+  const qualChanges = Object.keys(after.quals ?? {}).filter((k) => before.quals?.[k] && before.quals[k]!.status !== after.quals![k]!.status).map((k) => `qualification:${k}`);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  return keys.filter((k) => before[k] !== undefined && before[k] !== null && !same(after[k], before[k]));
+  return [...keys.filter((k) => before[k] !== undefined && before[k] !== null && !same(after[k], before[k])), ...qualChanges];
 }
 
 function normaliseCounty(value: string | null | undefined) {

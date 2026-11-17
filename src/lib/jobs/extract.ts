@@ -131,23 +131,34 @@ export async function extractJobListings({ dryRun = false } = {}): Promise<Extra
         if (v && !x && !/^(not specified|not available)/i.test(v)) report.droppedFields++;
         return x;
       };
-      // The row number is part of the table, not of the title.
-      const title = keep(f.title)?.replace(new RegExp(`^${seg.ordinal}\\s+`), '') ?? null;
+      const hash = createHash('sha256').update(seg.text).digest('hex');
+      // Same listing text as last time: a field the model dropped this run keeps its earlier verified value
+      // (it was checked verbatim against this exact segment), so re-running never loses information.
+      const prev = existing.find((e) => e.ordinal === seg.ordinal && e.segmentHash === hash);
+      const firstLine = seg.text.split('\n')[0] ?? '';
+      // County: the model's value, else the county named on the row's first line (deterministic, verbatim).
+      const county = keep(f.county) ?? /\b(?:Placer|El Dorado|Alpine|Sacramento|Nevada|Yolo) County\b|Greater Sacramento Region/.exec(firstLine)?.[0] ?? prev?.county ?? null;
+      // The row number is part of the table, not of the title; neither is a county the model ran into.
+      let title = keep(f.title)?.replace(new RegExp(`^${seg.ordinal}\\s+`), '') ?? null;
+      if (title && county && title.endsWith(` ${county}`)) title = title.slice(0, -county.length - 1).trim();
+      if (title && prev && title !== prev.title && title.startsWith(prev.title)) title = prev.title;
+      title ??= prev?.title ?? null;
       if (!title) {
         report.skipped.push({ ordinal: seg.ordinal, reason: 'title not found verbatim' });
         continue;
       }
-      const requiredSkills = keep(f.requiredSkills);
-      const summary = keep(f.summary);
+      const pick = <K extends keyof NonNullable<typeof prev>>(k: K, v: string | null) => v ?? ((prev?.[k] as string | null | undefined) ?? null);
+      const requiredSkills = pick('requiredSkills', keep(f.requiredSkills));
+      const summary = pick('summary', keep(f.summary));
       const occupations = classifyListing(title, `${requiredSkills ?? ''} ${summary ?? ''}`);
       rows.push({
         documentId: d.id, ordinal: seg.ordinal, title,
-        employer: keep(f.employer), county: keep(f.county), location: keep(f.location), requiredSkills,
-        qualifications: keep(f.qualifications), salary: keep(f.salary), employmentType: keep(f.employmentType),
-        datePosted: keep(f.datePosted), deadline: keep(f.deadline), summary,
-        sourceUrl: verbatimUrl(f.sourceUrl, seg.text), applyUrl: verbatimUrl(f.applyUrl, seg.text), contact: keep(f.contact),
+        employer: pick('employer', keep(f.employer)), county, location: pick('location', keep(f.location)), requiredSkills,
+        qualifications: pick('qualifications', keep(f.qualifications)), salary: pick('salary', keep(f.salary)), employmentType: pick('employmentType', keep(f.employmentType)),
+        datePosted: pick('datePosted', keep(f.datePosted)), deadline: pick('deadline', keep(f.deadline)), summary,
+        sourceUrl: pick('sourceUrl', verbatimUrl(f.sourceUrl, seg.text)), applyUrl: pick('applyUrl', verbatimUrl(f.applyUrl, seg.text)), contact: pick('contact', keep(f.contact)),
         occupations, sector: occupations[0] ? OCCUPATION_BY_KEY.get(occupations[0])!.sector : null,
-        segment: seg.text, segmentHash: createHash('sha256').update(seg.text).digest('hex'),
+        segment: seg.text, segmentHash: hash,
       });
     }
     report.listings = rows.length;

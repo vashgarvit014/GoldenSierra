@@ -30,6 +30,10 @@ export type FlowState = {
   askedQuestions: string[];
   /** The question id asked on the previous turn, if any — a reply is read against it. */
   pendingQuestion: string | null;
+  /** "See Results" was pressed while a requirement-deciding detail was missing: asked once, optionally. */
+  preResultsAsked?: boolean;
+  /** Results were requested; the next reply (an answer, or "Show results anyway") gets them. */
+  resultsRequested?: boolean;
 };
 
 /** The structured part of an assistant turn, carried in AssistantPayload.flow. */

@@ -78,6 +78,21 @@ export type CounselorContext = {
   /** Skill phrases they mentioned themselves. */
   skills?: string[];
   rolePreference?: 'technical' | 'supervisory' | 'both';
+  /**
+   * Qualifications, only as volunteered. A missing key means UNKNOWN; 'absent' means they said they don't
+   * have it; 'not_applicable' means it doesn't apply to them. Missing is never treated as failing.
+   * Keys: edu:hs | edu:associate | edu:bachelor, cert:<slug> (incl. cert:drivers_license),
+   * exp:<sector> | exp:supervisory | exp:any (with years when stated).
+   */
+  quals?: Record<string, QualFact>;
+  /** Education or training in progress ("working on her GED", "in a CNA course"). */
+  currentTraining?: string;
+};
+
+export type QualFact = {
+  status: 'has' | 'absent' | 'not_applicable';
+  /** Years of experience as a range: "2–4 years" → {2,4}; "5+" → {5,99}; "under 2" → {0,1}. */
+  years?: { min: number; max: number };
 };
 
 export type ContextFieldKey = keyof CounselorContext;

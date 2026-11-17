@@ -228,7 +228,8 @@ export type OccupationHit = { key: string; score: number; titleHits: string[]; s
  * is weak evidence (1). Returns hits with score ≥ `min`, strongest first.
  */
 export function classify(text: string, min = 3): OccupationHit[] {
-  const t = text.toLowerCase().replace(/\s+/g, ' ');
+  // A driver's license is a credential, not the occupation "driver".
+  const t = text.toLowerCase().replace(/\s+/g, ' ').replace(/driver'?s licen[cs]e|driving licen[cs]e/g, ' ');
   const hits: OccupationHit[] = [];
   for (const o of OCCUPATIONS) {
     const titleHits = o.titles.filter((p) => re(p).test(t));
