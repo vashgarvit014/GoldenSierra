@@ -23,7 +23,9 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "setup": "tsx scripts/setup-check.ts",
-    "reclassify": "tsx scripts/reclassify.ts"
+    "reclassify": "tsx scripts/reclassify.ts",
+    "programs:link": "tsx scripts/link-programs.ts",
+    "audit:coverage": "tsx scripts/coverage-audit.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",

@@ -53,6 +53,8 @@ const schema = z.object({
   LLM_MODEL: z.string().default('gpt-4o-mini'),
   LLM_TEMPERATURE: num(0.2),
   LLM_MAX_TOKENS: int(2000),
+  /** Sent as reasoning_effort to reasoning models (mercury-3). Empty disables it; a provider that rejects it is retried without. */
+  LLM_REASONING_EFFORT: z.enum(['', 'low', 'medium', 'high']).default('low'),
 
   // 'local' runs the model in-process via Transformers.js (no API key).
   // Anything else is treated as an OpenAI-compatible HTTP endpoint.

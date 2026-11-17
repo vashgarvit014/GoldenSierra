@@ -1,4 +1,5 @@
 import { getLlmClient } from '../ai/client';
+import { completeAnswer } from '../ai/complete';
 import { env, hasLlm } from '../env';
 import { logger } from '../logger';
 import { withTimeout } from '../errors';
@@ -403,30 +404,10 @@ export async function generateAnswer(input: GenerateInput): Promise<GenerateResu
 
   if (prepared.preAnswer === null) {
     if (!hasLlm()) return buildUnavailableResult(prepared, started);
-    try {
-      const client = getLlmClient();
-      const response = await withTimeout(
-        client.chat.completions.create({
-          model: env.LLM_MODEL,
-          temperature: env.LLM_TEMPERATURE,
-          max_tokens: env.LLM_MAX_TOKENS,
-          messages: prepared.messages,
-        }),
-        45_000,
-        'answer generation',
-      );
-      raw = response.choices[0]?.message?.content?.trim() ?? '';
-      usage = {
-        promptTokens: response.usage?.prompt_tokens,
-        completionTokens: response.usage?.completion_tokens,
-      };
-    } catch (err) {
-      logger.error('Answer generation failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return buildUnavailableResult(prepared, started);
-    }
-    if (!raw) return buildUnavailableResult(prepared, started);
+    const done = await completeAnswer(prepared.messages, { label: 'answer generation', temperature: env.LLM_TEMPERATURE });
+    if (done.status === 'error') return buildUnavailableResult(prepared, started);
+    raw = done.text;
+    usage = { promptTokens: done.promptTokens, completionTokens: done.completionTokens };
   }
 
   const done = await completeTurn(prepared, raw, input.message, started);
@@ -488,22 +469,11 @@ const REPAIR_NOTE = (rejected: string[]) =>
 
 /** One bounded retry. Returns null if the model is unreachable; the caller then keeps the refusal. */
 async function repairAnswer(prepared: PreparedTurn, raw: string, rejected: string[]): Promise<string | null> {
-  try {
-    const response = await withTimeout(
-      getLlmClient().chat.completions.create({
-        model: env.LLM_MODEL,
-        temperature: 0,
-        max_tokens: env.LLM_MAX_TOKENS,
-        messages: [...prepared.messages, { role: 'assistant', content: raw }, { role: 'user', content: REPAIR_NOTE(rejected) }],
-      }),
-      30_000,
-      'answer repair',
-    );
-    return response.choices[0]?.message?.content?.trim() || null;
-  } catch (err) {
-    logger.warn('Answer repair failed', { error: err instanceof Error ? err.message : String(err) });
-    return null;
-  }
+  const done = await completeAnswer(
+    [...prepared.messages, { role: 'assistant', content: raw }, { role: 'user', content: REPAIR_NOTE(rejected) }],
+    { label: 'answer repair', timeoutMs: 30_000 },
+  );
+  return done.text || null;
 }
 
 /**
@@ -559,36 +529,13 @@ export async function* streamAnswer(
     return { raw: text };
   }
 
-  const client = getLlmClient();
-  let raw = '';
-
-  try {
-    const stream = await client.chat.completions.create({
-      model: env.LLM_MODEL,
-      temperature: env.LLM_TEMPERATURE,
-      max_tokens: env.LLM_MAX_TOKENS,
-      messages: prepared.messages,
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (!delta) continue;
-      raw += delta;
-      yield delta;
-    }
-  } catch (err) {
-    logger.error('Streaming generation failed', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    if (!raw) {
-      const text = unavailableMessage();
-      yield text;
-      return { raw: text };
-    }
-  }
-
-  return { raw };
+  // The chat route verifies the whole answer before sending anything, so nothing is lost by
+  // generating it in one bounded call: an upstream stream cannot be retried once it is cut off, and
+  // a reasoning model's stream ends silently empty or mid-sentence when the budget runs out.
+  // An empty result reaches the verifier as '' and becomes GENERATION_FAILED_TEXT, not a refusal.
+  const done = await completeAnswer(prepared.messages, { label: 'answer generation', temperature: env.LLM_TEMPERATURE });
+  if (done.text) yield done.text;
+  return { raw: done.text };
 }
 
 export async function generateFollowUps(

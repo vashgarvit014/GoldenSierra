@@ -176,12 +176,13 @@ async function notedFacts(page: Page): Promise<string[]> {
     // Asserting eligibility about a person, not the word in any context.
     const asserted =
       /\b(you|she|he|they)\s+(are|is)\s+eligible\b/i.test(resultsText) ||
-      /\b(you|she|he|they)\s+qualif(y|ies)\b/i.test(resultsText) ||
+      // "Whether they qualify … is confirmed by staff" defers the decision; it is not a claim.
+      /(?<!\b(whether|if)\s)\b(you|she|he|they)\s+qualif(y|ies)\b/i.test(resultsText) ||
       /\b(has|have|been)\s+approved\b/i.test(resultsText);
     check('no asserted eligibility', !asserted, asserted ? resultsText.slice(0, 160) : '');
     check(
       'eligibility framed as needing confirmation',
-      /may qualify|staff can confirm|to confirm|worth checking/i.test(resultsText),
+      /may qualify|staff can confirm|to confirm|worth checking|confirmed by Golden Sierra staff/i.test(resultsText),
     );
     await page.screenshot({ path: path.join(OUT, '4-results.png'), fullPage: true });
 

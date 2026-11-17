@@ -185,6 +185,24 @@ export function matchPrograms(programs: ProgramRow[], ctx: CounselorContext): Pr
   });
 }
 
+/**
+ * A program's verdict under its *published* requirements only: each verified rule with a source
+ * (pass / fail / unknown), its service area, and its audience. Heuristic signals are excluded, so
+ * question selection is driven by what programs actually require.
+ */
+export function requirementVerdicts(p: ProgramRow, ctx: CounselorContext): string {
+  const parts: string[] = [];
+  if (p.serviceAreas.length) parts.push(`area:${ctx.county ? p.serviceAreas.some((a) => a.county === ctx.county) : '?'}`);
+  if (p.audience !== 'both') parts.push(`aud:${ctx.audience ? ctx.audience === p.audience : '?'}`);
+  for (const rule of p.rules) {
+    if (!rule.verified || !rule.sourceUrl) continue;
+    const actual = resolveField(rule.field, ctx);
+    const ok = actual === undefined ? null : applyOperator(rule.operator, actual, rule.value);
+    parts.push(`${rule.field}:${ok === null ? '?' : ok}`);
+  }
+  return `${p.slug}[${parts.join(',')}]`;
+}
+
 /** Most promising first; mismatches drop out entirely. */
 export function rankMatches(matches: ProgramMatch[]): ProgramMatch[] {
   const weight: Record<MatchState, number> = {

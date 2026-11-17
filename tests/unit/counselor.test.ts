@@ -109,6 +109,13 @@ const candidates: ProgramMatch[] = [
   { id: '3', slug: 'paid-internships', name: 'Internships', shortDescription: '', state: 'needs_verification', reasons: [], openQuestions: [], officialUrl: null, contactPhone: null, nextSteps: null, counties: ['Placer'], category: 'Internships' },
 ];
 
+// Catalogue rows behind those candidates, with published requirements (service area, an age range).
+const rows: ProgramRow[] = [
+  program({ id: '1', slug: 'job-search-assistance', serviceAreas: [area('Placer')], rules: [rule()] }),
+  program({ id: '2', slug: 'training-scholarships', serviceAreas: [area('Placer'), area('Alpine')], rules: [rule()] }),
+  program({ id: '3', slug: 'paid-internships', serviceAreas: [area('Placer')], rules: [rule(), rule({ id: 'r2', field: 'AGE', operator: 'BETWEEN', value: [16, 24], hard: false, description: 'Ages 16-24' })] }),
+];
+
 describe('selectNextQuestion', () => {
   it('asks exactly one question, never a fixed script', () => {
     const choice = selectNextQuestion(base(), candidates, []);
@@ -138,10 +145,23 @@ describe('selectNextQuestion', () => {
     if (choice) expect(choice.question.id).not.toBe('transportation');
   });
 
-  it('asks transport once a county is known', () => {
-    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', education: 'no_hs_diploma', age: 19 });
-    const choice = selectNextQuestion(ctx, candidates, ['audience', 'incomeUrgency', 'employmentStatus']);
+  it('asks transport when the answer would change what is searched for (a local-services search)', () => {
+    // Three needs already planned (career, GED, young adults): only "no car"/"transit only" adds a
+    // search for services near them, so transport is the question whose answer changes the plan.
+    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', education: 'no_hs_diploma', age: 19, ageBand: '18_24' });
+    const choice = selectNextQuestion(ctx, candidates, ['audience', 'incomeUrgency', 'employmentStatus', 'incomeUrgency', 'employmentStatus'], rows);
     expect(choice?.question.id).toBe('transportation');
+  });
+
+  it('asks about age when the answer decides a published age range', () => {
+    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', education: 'ged_or_hs', incomeUrgency: 'immediate', employmentStatus: 'unemployed', transportation: 'own_vehicle' });
+    expect(selectNextQuestion(ctx, candidates, [], rows)?.question.id).toBe('age');
+  });
+
+  it('never asks an employer about their own schooling, age or income', () => {
+    const ctx = base({ mode: 'self', audience: 'employer', county: 'Placer' });
+    const ids = ['careerInterest', 'education', 'incomeUrgency', 'employmentStatus', 'age', 'transportation'];
+    expect(ids).not.toContain(selectNextQuestion(ctx, candidates, [], rows)?.question.id);
   });
 
   it('stops asking when everything useful is known — no infinite loop', () => {
@@ -166,32 +186,31 @@ describe('readyForResults', () => {
     expect(readyForResults(base(), candidates)).toBe(false);
   });
 
-  it('still waits while a decisive question is unanswered', () => {
-    // County is known, so transport is now worth asking — and transport
-    // changes the shortlist more than anything else. Three known dimensions
-    // is not a licence to stop asking.
-    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', incomeUrgency: 'immediate' });
-    expect(readyForResults(ctx, candidates, [])).toBe(false);
+  it('still waits while a decisive question is unanswered (every answer leads somewhere different)', () => {
+    // Earn now, train first or either: three different searches, so income urgency is decisive.
+    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', transportation: 'none' });
+    expect(readyForResults(ctx, candidates, [], rows)).toBe(false);
   });
 
-  it('is ready once the decisive questions are covered', () => {
-    const ctx = base({
-      county: 'Placer', careerInterest: 'healthcare',
-      incomeUrgency: 'immediate', transportation: 'none',
-    });
-    expect(readyForResults(ctx, candidates, [])).toBe(true);
+  it('still waits while an answer would decide a published requirement (age range)', () => {
+    const ctx = base({ county: 'Placer', careerInterest: 'healthcare', incomeUrgency: 'immediate', employmentStatus: 'unemployed' });
+    expect(readyForResults(ctx, candidates, [], rows)).toBe(false);
+    expect(readyForResults({ ...ctx, age: 30, ageBand: '25_54' }, candidates, [], rows)).toBe(true);
+    // Without a published age rule, age only changes the search a little: not worth holding results for.
+    const noAgeRule = rows.map((r) => ({ ...r, rules: r.rules.filter((x) => x.field !== 'AGE') }));
+    expect(readyForResults(ctx, candidates, [], noAgeRule)).toBe(true);
   });
 
   it('keeps waiting when a decisive question was asked but sidestepped', () => {
     const ctx = base({ county: 'Placer', careerInterest: 'healthcare' });
     // Asked once, answered neither — people often reply to something else.
-    expect(readyForResults(ctx, candidates, ['transportation', 'incomeUrgency'])).toBe(false);
+    expect(readyForResults(ctx, candidates, ['transportation', 'incomeUrgency'], rows)).toBe(false);
   });
 
-  it('stops waiting after a second unanswered ask, so it cannot loop', () => {
+  it('stops after the question budget, so it cannot loop', () => {
     const ctx = base({ county: 'Placer', careerInterest: 'healthcare' });
     const asked = ['transportation', 'incomeUrgency', 'transportation', 'incomeUrgency'];
-    expect(readyForResults(ctx, candidates, asked)).toBe(true);
+    expect(readyForResults(ctx, candidates, asked, rows)).toBe(true);
   });
 });
 

@@ -4,6 +4,7 @@ import { prisma } from '../db';
 import { STRICT_FACTUAL_PROMPT, buildContextBlock } from '../ai/prompts';
 import { deduplicateSources, detectConflicts } from '../rag/consolidate';
 import { retrieve } from '../rag/retrieve';
+import { namedIn } from '../programs/link';
 import { KB_UNAVAILABLE_TEXT, NO_ANSWER_TEXT, THRESHOLDS, contentTerms, relevanceGate, validateChunks } from '../rag/strict';
 import type { PreparedTurn } from '../rag/generate';
 import type { CounselorContext } from '@/types/counselor';
@@ -17,45 +18,12 @@ import type { AssistantPayload, CandidateStatus, QueryAnalysis, Recommendation, 
  *   2. PostgreSQL validation and the deterministic relevance gate on each,
  *   3. one strict generation over the union, then the same claim-by-claim verifier as factual answers
  *      (run by completeTurn), so every sentence that survives is supported and cited.
- * Program cards are shown only for catalogue programs that a cited chunk actually names.
+ * Program cards are shown only for catalogue programs linked to the cited chunk's document that the
+ * cited chunk itself names (see programs/link.ts).
  */
 
-export type Focus = { key: string; label: string; query: string; /** A passage must mention this (e.g. the town) to count for this focus. */ require?: string };
-
-const title = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
-
-/** One focused query per need the user has expressed — never a fixed list, never more than five. */
-export function focusQueries(ctx: CounselorContext, message: string): Focus[] {
-  const out: Focus[] = [];
-  const pop = new Set(ctx.population);
-  if (ctx.audience === 'employer') out.push({ key: 'employer', label: 'hiring help for a business', query: 'employer services help businesses hire and train employees' });
-  if (ctx.careerInterest && !/still deciding|not sure|unsure|undecided/i.test(ctx.careerInterest)) {
-    out.push({ key: 'career', label: `${ctx.careerInterest} training`, query: `${ctx.careerInterest} training career pathway` });
-  }
-  if (ctx.education === 'no_hs_diploma' || ctx.education === 'working_on_ged') {
-    out.push({ key: 'education', label: 'finishing a GED or diploma', query: 'GED high school diploma equivalency adult education' });
-  }
-  if (ctx.incomeUrgency === 'immediate' || (ctx.employmentStatus === 'unemployed' && ctx.incomeUrgency !== 'can_train_first')) {
-    out.push({ key: 'work', label: 'finding paid work soon', query: 'job search assistance help finding a job employment' });
-  } else if (ctx.incomeUrgency === 'can_train_first') {
-    out.push({ key: 'funding', label: 'paying for training', query: 'training scholarships pay for training' });
-  }
-  if (ctx.employmentStatus === 'laid_off' || pop.has('dislocated_worker')) {
-    out.push({ key: 'layoff', label: 'support after a layoff', query: 'layoff assistance dislocated workers' });
-  }
-  if (pop.has('veteran')) out.push({ key: 'veteran', label: 'veteran services', query: 'veterans priority of service' });
-  if (pop.has('former_foster_youth') || pop.has('youth') || ctx.ageBand === '18_24' || ctx.ageBand === 'under_18') {
-    out.push({ key: 'youth', label: 'services for young adults', query: `youth program young adults${pop.has('former_foster_youth') ? ' foster youth' : ''}` });
-  }
-  if (pop.has('disability')) out.push({ key: 'disability', label: 'disability accommodations', query: 'disability services accommodations' });
-  const place = ctx.city ? title(ctx.city) : ctx.county ? `${ctx.county} County` : null;
-  if (place && (ctx.transportation === 'none' || ctx.transportation === 'transit_only' || out.length < 3)) {
-    const town = ctx.city ? title(ctx.city) : ctx.county!;
-    out.push({ key: 'location', label: `services in or near ${place}`, query: `${town} job services events workshops`, require: town.toLowerCase() });
-  }
-  if (out.length === 0) out.push({ key: 'request', label: 'the request', query: message.slice(0, 300) });
-  return out.slice(0, 5);
-}
+export { focusQueries, type Focus } from './focus';
+import { focusQueries, type Focus } from './focus';
 
 /** What the strict generator is asked: the situation as facts, and the instruction to name only what the sources describe. */
 export function guidedQuestion(ctx: CounselorContext, focuses: Focus[]): string {
@@ -131,7 +99,7 @@ export async function prepareGuidedResults(ctx: CounselorContext, message: strin
   for (const res of perFocus) {
     if (!res) continue;
     const ranked = [...res.gate.relevant]
-      .filter((s) => !res.focus.require || `${s.title} ${s.headingPath ?? ''} ${s.snippet}`.toLowerCase().includes(res.focus.require))
+      .filter((s) => !res.focus.require || new RegExp(res.focus.require, 'i').test(`${s.title} ${s.headingPath ?? ''} ${s.snippet}`))
       .sort((a, b) => b.score - a.score);
     let taken = 0;
     for (const s of ranked) {
@@ -220,21 +188,35 @@ export async function cardsFromCitations(
   const cited = new Set(payload.citations.flatMap((c) => c.chunkIds ?? []));
   const chunks = payload.sources.filter((s) => cited.has(s.chunkId));
   if (chunks.length === 0) return [];
-  let programs: { slug: string; name: string; category: { slug: string } | null }[] = [];
+  let programs: { slug: string; name: string; category: { slug: string } | null; documents: { documentId: string }[] }[] = [];
   try {
-    programs = await prisma.program.findMany({ where: { status: 'ACTIVE' }, select: { slug: true, name: true, category: { select: { slug: true } } } });
+    programs = await prisma.program.findMany({
+      where: { status: 'ACTIVE', documents: { some: { documentId: { in: chunks.map((c) => c.documentId) } } } },
+      select: { slug: true, name: true, category: { select: { slug: true } }, documents: { select: { documentId: true } } },
+      orderBy: { sortOrder: 'asc' },
+    });
   } catch (err) {
     logger.warn('Program catalogue unavailable for cards', { error: String(err) });
     return [];
   }
   const cards: Recommendation[] = [];
   for (const p of programs) {
-    // "Paid Internships" is named "a paid internship" on the page: match the singular too.
-    const base = p.name.replace(/\s*\(.*?\)\s*/g, '').trim().replace(/s$/, '');
-    if (base.length < 4) continue;
-    const chunk = chunks.find((c) => `${c.title} ${c.snippet}`.toLowerCase().includes(base.toLowerCase()));
-    if (!chunk) continue;
-    const sentence = sentenceNaming(chunk.snippet, base) ?? sentenceNaming(chunk.title, base);
+    // A card needs both: the cited chunk's document is linked to the program (ProgramDocument, built by
+    // linkProgramsToDocuments from the same naming test), and the cited chunk itself names the program.
+    const linked = new Set(p.documents.map((d) => d.documentId));
+    let chunk: RetrievedSource | undefined;
+    let phrase: string | null = null;
+    for (const c of chunks) {
+      if (!linked.has(c.documentId)) continue;
+      phrase = namedIn(`${c.headingPath ?? ''} ${c.snippet}`, p);
+      if (phrase) {
+        chunk = c;
+        break;
+      }
+    }
+    if (!chunk || !phrase) continue;
+    const base = p.name.replace(/\s*\(.*?\)\s*/g, '').trim();
+    const sentence = sentenceNaming(chunk.snippet, phrase) ?? sentenceNaming(chunk.title, phrase);
     if (!sentence) continue;
     const focus = focusOf.get(chunk.chunkId);
     const citation = payload.citations.find((c) => c.chunkIds?.includes(chunk.chunkId));

@@ -5,10 +5,9 @@ import { logger } from '../logger';
 import { withTimeout } from '../errors';
 import { parseModelJson } from '../ai/json';
 import { structuredTokenBudget } from '../ai/prompts';
-import { checkGrounding, softenOverclaims } from '../rag/consolidate';
-import { retrieve, verifySourcesAreLive } from '../rag/retrieve';
-import { rerank } from '../rag/rerank';
+import { softenOverclaims } from '../rag/consolidate';
 import { extractContext, mergeContext } from './extract';
+import { verifiedResults } from '../conversation/flow';
 import {
   buildAssumptions,
   buildKnownFacts,
@@ -25,7 +24,6 @@ import type {
   ProgramMatch,
   QuickReply,
 } from '@/types/counselor';
-import type { QueryAnalysis } from '@/types/chat';
 
 /**
  * The counselor turn engine.
@@ -85,16 +83,6 @@ In helper mode the user is asking on behalf of someone else: say "they" / "them"
 Return JSON: {"message": "...", "quickReplies": ["...", "..."]}
 quickReplies: 2–4 short plausible answers to YOUR question, 1–4 words each. Omit if the question is open-ended.`;
 
-const RESULTS_SYSTEM = `You are a workforce counselor for Golden Sierra Job Training Agency summing up for someone at the end of a short conversation.
-
-Open with one or two sentences that reflect their actual situation back to them, then hand over to the recommendations listed beside your message — do NOT re-list the programs in your text, they are shown as cards.
-
-Close with the single most useful next step.
-
-Under 110 words. Never claim anyone is eligible or approved — say "may qualify", "staff can confirm". Never invent a program, amount, deadline or phone number. In helper mode say "they", not "you".
-
-Return JSON: {"message": "...", "quickReplies": []}`;
-
 export async function runTurn(input: TurnInput): Promise<TurnOutput> {
   const started = Date.now();
 
@@ -118,8 +106,8 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
   const narrowing = buildNarrowing(context, matchPrograms(programs, context), total);
 
   // ── 3. Decide the single next question ──
-  const ready = input.forceResults || readyForResults(context, matches, input.askedQuestions);
-  const choice = ready ? null : selectNextQuestion(context, matches, input.askedQuestions);
+  const ready = input.forceResults || readyForResults(context, matches, input.askedQuestions, programs);
+  const choice = ready ? null : selectNextQuestion(context, matches, input.askedQuestions, programs);
 
   // Once there is nothing useful left to ask, go straight to recommendations.
   // An intermediate "I think I have enough" turn adds a round trip, says
@@ -131,28 +119,46 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
     ? [...input.askedQuestions, choice.question.id]
     : input.askedQuestions;
 
-  // ── 4. Retrieval (only when producing results) ──
-  let sources: CounselorTurn['sources'] = [];
-  let evidence: Awaited<ReturnType<typeof retrieve>>['sources'] = [];
+  const assumption = buildAssumptions(context, matches);
+
+  // ── 4. Results: the same strict, verified pipeline as the admin guided chat ──
+  // Focused retrieval over PostgreSQL-validated chunks, one bounded generation, every sentence
+  // verified against the chunks with citations rebuilt, cards only for catalogue programs linked
+  // to a cited document that the cited chunk names. Nothing on this turn comes from the catalogue
+  // text or the model's memory.
   if (stage === 'results') {
-    try {
-      const analysis = analysisFor(context, input.message);
-      const retrieved = await retrieve(analysis, {
-        county: context.county,
-        audience: context.audience,
-        employmentStatus: context.employmentStatus,
-        careerInterests: context.careerInterest ? [context.careerInterest] : undefined,
-        isVeteran: context.population.includes('veteran') || undefined,
-      });
-      const live = await verifySourcesAreLive(retrieved.sources);
-      const { sources: ranked } = await rerank(analysis, live);
-      evidence = ranked.slice(0, 6);
-      sources = evidence.map((srcItem, i) => ({ id: i + 1, title: srcItem.title, url: srcItem.url }));
-    } catch (err) {
-      logger.warn('Retrieval failed for counselor results', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    const r = await verifiedResults({ ctx: context, message: input.message, started, corrections: [], uncertainties: [], refine: null });
+    logger.debug('Counselor results', { answered: r.answered, cards: r.recommendations.length, ms: Date.now() - started });
+    return {
+      askedQuestions,
+      turn: {
+        stage,
+        message: r.answer,
+        nextQuestion: null,
+        quickReplies: [],
+        assumption,
+        knownFacts: buildKnownFacts(context),
+        narrowing,
+        context,
+        recommendations: r.recommendations.map((card, i) => ({
+          id: card.slug ?? `card-${i}`,
+          slug: card.slug ?? `card-${i}`,
+          name: card.name,
+          shortDescription: card.shortDescription,
+          state: 'needs_verification' as const,
+          reasons: [card.whyRelevant],
+          openQuestions: [],
+          officialUrl: card.officialUrl,
+          contactPhone: null,
+          nextSteps: null,
+          counties: [],
+          category: card.category,
+        })),
+        sources: r.done.payload.citations.map((c) => ({ id: c.id, title: c.title, url: c.url })),
+        canShowResults: true,
+        grounded: r.done.payload.grounded,
+      },
+    };
   }
 
   // ── 5. Write it ──
@@ -166,13 +172,7 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
     narrowing,
   });
 
-  const assumption = buildAssumptions(context, matches);
   const pendingLabel = choice ? pendingLabelFor(choice.question.id) : undefined;
-
-  const grounding = stage === 'results' ? checkGrounding(message, evidence) : { grounded: true, issues: [], unsupportedClaims: [] };
-  if (!grounding.grounded) {
-    logger.warn('Counselor results failed grounding', { issues: grounding.issues.slice(0, 3) });
-  }
 
   logger.debug('Counselor turn', {
     stage,
@@ -186,17 +186,17 @@ export async function runTurn(input: TurnInput): Promise<TurnOutput> {
     askedQuestions,
     turn: {
       stage,
-      message: softenOverclaims(stage === 'clarification' ? enforceSingleQuestion(message) : message),
+      message: softenOverclaims(enforceSingleQuestion(message)),
       nextQuestion: choice ? choice.question.prompt(context.mode, context) : null,
       quickReplies,
       assumption,
       knownFacts: buildKnownFacts(context, pendingLabel),
       narrowing,
       context,
-      recommendations: stage === 'results' ? matches.slice(0, 6) : [],
-      sources,
+      recommendations: [],
+      sources: [],
       canShowResults: ready || criteriaFor(context).filter((c) => c.applied).length >= 2,
-      grounded: stage === 'results' ? grounding.grounded && evidence.length > 0 : true,
+      grounded: true,
     },
   };
 }
@@ -212,7 +212,7 @@ async function compose(args: {
   matches: ProgramMatch[];
   narrowing: CounselorTurn['narrowing'];
 }): Promise<{ message: string; quickReplies: QuickReply[] }> {
-  const { stage, context, question } = args;
+  const { context, question } = args;
 
   // Deterministic quick replies — the model may suggest, but these are the
   // ones the backend knows map to real answers.
@@ -222,11 +222,8 @@ async function compose(args: {
     return { message: fallbackMessage(args), quickReplies: canonical };
   }
 
-  const system = stage === 'results' ? RESULTS_SYSTEM : COUNSELOR_SYSTEM;
-  const brief =
-    stage === 'results'
-      ? resultsBrief(args)
-      : clarificationBrief(args);
+  const system = COUNSELOR_SYSTEM;
+  const brief = clarificationBrief(args);
 
   try {
     const client = getLlmClient();
@@ -311,30 +308,9 @@ function clarificationBrief(args: Parameters<typeof compose>[0]): string {
   ].join('\n');
 }
 
-function resultsBrief(args: Parameters<typeof compose>[0]): string {
-  const { context, matches } = args;
-  const top = matches.slice(0, 4).map((m) => `- ${m.name} (${m.state.replace(/_/g, ' ')})`).join('\n');
-  return [
-    `Mode: ${context.mode === 'helper' ? 'HELPER — say "they"' : 'SELF — say "you"'}`,
-    `Their situation: ${JSON.stringify(stripEmpty(context))}`,
-    '',
-    'These services are being shown as cards beside your message — do NOT list them again:',
-    top || '(none matched)',
-    '',
-    'Write the short summary and the single best next step.',
-  ].join('\n');
-}
-
 /** Used whenever the model is unavailable — still a usable conversation. */
 function fallbackMessage(args: Parameters<typeof compose>[0]): string {
-  const { context, question, stage, matches } = args;
-  const they = context.mode === 'helper' ? 'they' : 'you';
-
-  if (stage === 'results') {
-    return matches.length
-      ? `Based on what you've told me, here are the services worth looking at. Golden Sierra staff can confirm what ${they} qualify for — call (916) 746-7722 or submit the interest form to get started.`
-      : `I don't have enough matching information to recommend specific services yet. Golden Sierra staff can help directly — call (916) 746-7722, Monday to Thursday, 8:00am–4:30pm.`;
-  }
+  const { context, question } = args;
   return question
     ? `Thanks — that helps. ${question.prompt(context.mode, context)}`
     : `Thanks — I think I have enough to show you some options.`;
@@ -367,30 +343,6 @@ function pendingLabelFor(id: string): string {
     incomeUrgency: 'Income urgency',
   };
   return labels[id] ?? 'More detail';
-}
-
-/** Adapts counselor context to the shape the existing retriever expects. */
-function analysisFor(context: CounselorContext, message: string): QueryAnalysis {
-  const parts = [
-    context.careerInterest,
-    context.education === 'no_hs_diploma' || context.education === 'working_on_ged' ? 'GED high school equivalency' : null,
-    context.incomeUrgency === 'immediate' ? 'job openings employment' : null,
-    context.incomeUrgency === 'can_train_first' ? 'training scholarship' : null,
-    context.population.includes('former_foster_youth') ? 'youth services' : null,
-    context.population.includes('veteran') ? 'veteran priority of service' : null,
-    context.county ? `${context.county} County` : null,
-  ].filter(Boolean) as string[];
-
-  return {
-    intent: context.audience === 'employer' ? 'employer_hiring' : context.incomeUrgency === 'immediate' ? 'find_job' : 'find_training',
-    confidence: 0.8,
-    rewrittenQuery: parts.length ? parts.join(' ') : message,
-    keywords: parts,
-    profileUpdates: {},
-    missingInfo: null,
-    isMultiPart: false,
-    subQuestions: [],
-  };
 }
 
 function stripEmpty(ctx: CounselorContext) {

@@ -5,6 +5,9 @@ import type {
   SessionMode,
 } from '@/types/counselor';
 import { SUBJECT } from '@/types/counselor';
+import { mergeContext, ruleExtract } from './extract';
+import { requirementVerdicts, type ProgramRow } from './matching';
+import { focusQueries } from '../conversation/focus';
 
 /**
  * Adaptive next-question selection.
@@ -13,11 +16,14 @@ import { SUBJECT } from '@/types/counselor';
  * rather than left to the model: the LLM writes the sentence, but *which*
  * question gets asked is decided here, from evidence.
  *
- * The rule is information gain. For each unanswered question we compute how
- * much knowing the answer would actually narrow the live candidate set. A
- * question that cannot change the outcome — because every remaining program
- * treats the answer identically — is skipped, however standard it looks. That
- * is what stops the assistant marching every user through the same script.
+ * The rule is information gain, measured against the real catalogue. For each
+ * unanswered question, every offered answer is simulated: the answer is read
+ * by the same extractor as a real reply, the live programs are re-matched
+ * against their published eligibility rules (service area, age, audience,
+ * veteran status…), and the retrieval plan is rebuilt. A question whose answers
+ * all lead to the same verdicts and the same searches cannot change the outcome
+ * and is skipped, however standard it looks. There is no fixed order: the
+ * per-question base value only breaks ties.
  */
 
 export type QuestionId =
@@ -38,18 +44,15 @@ export type Question = {
   /** Written per mode so helper mode says "they", not "you". */
   prompt: (mode: SessionMode, ctx: CounselorContext) => string;
   quickReplies: (mode: SessionMode) => QuickReply[];
-  /**
-   * How a candidate program would be partitioned by each possible answer.
-   * Returning the same bucket for every program means zero information gain.
-   */
-  partition: (match: ProgramMatch) => string;
-  /** Baseline weight when candidate partitioning is uninformative. */
+  /** Tie-breaker only (10% of the score); the answer simulation decides. */
   baseValue: number;
   /** Never ask unless this holds. */
   applicable?: (ctx: CounselorContext) => boolean;
 };
 
 const s = (mode: SessionMode) => SUBJECT[mode];
+/** Questions about a job seeker's own situation do not apply to an employer. */
+const seeker = (ctx: CounselorContext) => ctx.audience !== 'employer';
 
 export const QUESTIONS: Question[] = [
   {
@@ -66,7 +69,6 @@ export const QUESTIONS: Question[] = [
       { label: 'Looking for work', value: 'I am looking for work' },
       { label: "I'm an employer", value: 'I am an employer looking to hire' },
     ],
-    partition: (m) => (m.category ?? 'none'),
   },
   {
     id: 'county',
@@ -80,8 +82,6 @@ export const QUESTIONS: Question[] = [
       { label: 'Alpine', value: 'Alpine County' },
       { label: 'Not sure', value: "I'm not sure which county" },
     ],
-    // Programs differ by service area, so county genuinely splits the set.
-    partition: (m) => m.counties.slice().sort().join(',') || 'any',
   },
   {
     id: 'careerInterest',
@@ -95,7 +95,7 @@ export const QUESTIONS: Question[] = [
       { label: 'Office / admin', value: 'Interested in office or administrative work' },
       { label: 'Still deciding', value: 'Still deciding what kind of work' },
     ],
-    partition: (m) => m.category ?? 'none',
+    applicable: seeker,
   },
   {
     id: 'education',
@@ -109,7 +109,7 @@ export const QUESTIONS: Question[] = [
       { label: 'Not started', value: 'No high school diploma or GED yet' },
       { label: 'Some college', value: 'Has some college' },
     ],
-    partition: (m) => (/training|scholarship|internship/i.test(m.slug) ? 'education_sensitive' : 'other'),
+    applicable: seeker,
   },
   {
     id: 'transportation',
@@ -125,8 +125,7 @@ export const QUESTIONS: Question[] = [
       { label: 'No reliable transport', value: 'No reliable transport right now' },
     ],
     // Only worth asking once we know where they are.
-    applicable: (ctx) => Boolean(ctx.county ?? ctx.city),
-    partition: (m) => (m.counties.length > 1 ? 'multi_site' : 'single_site'),
+    applicable: (ctx) => seeker(ctx) && Boolean(ctx.county ?? ctx.city),
   },
   {
     id: 'incomeUrgency',
@@ -139,13 +138,7 @@ export const QUESTIONS: Question[] = [
       { label: 'Can train first', value: 'Can focus on training for a few months' },
       { label: 'Open to both', value: 'Open to either' },
     ],
-    // This is the sharpest split in the catalogue: earn-now vs train-first.
-    partition: (m) =>
-      /job-search|hiring-events|recruitment/i.test(m.slug)
-        ? 'earn_now'
-        : /training|scholarship|metrix|internship/i.test(m.slug)
-          ? 'train_first'
-          : 'either',
+    applicable: seeker,
   },
   {
     id: 'employmentStatus',
@@ -158,7 +151,7 @@ export const QUESTIONS: Question[] = [
       { label: 'Recently laid off', value: 'Recently laid off' },
       { label: 'Working, want better', value: 'Working but looking for something better' },
     ],
-    partition: (m) => (/layoff|rapid|dislocated/i.test(m.slug) ? 'layoff' : 'other'),
+    applicable: seeker,
   },
   {
     id: 'age',
@@ -172,19 +165,45 @@ export const QUESTIONS: Question[] = [
       { label: '25–54', value: 'Aged 25 to 54' },
       { label: '55+', value: 'Aged 55 or older' },
     ],
-    partition: (m) => (/internship|youth/i.test(m.slug) ? 'age_gated' : 'open'),
+    applicable: seeker,
   },
 ];
 
-/** Normalised Shannon entropy of how a question splits the candidate set. */
-function entropy(buckets: Map<string, number>, total: number): number {
-  if (total === 0 || buckets.size <= 1) return 0;
+/** Shannon entropy of the answer outcomes, normalised by the number of answers offered. */
+function entropy(buckets: Map<string, number>, total: number, options = buckets.size): number {
+  if (total === 0 || buckets.size <= 1 || options <= 1) return 0;
   let h = 0;
   for (const n of buckets.values()) {
     const p = n / total;
     if (p > 0) h -= p * Math.log2(p);
   }
-  return h / Math.log2(buckets.size);
+  return h / Math.log2(options);
+}
+
+export type AnswerSplit = {
+  /** 0–1: how differently the next step goes across the offered answers (1 = every answer differs). */
+  split: number;
+  /** Some answer changes a program's verdict under its published rules (not just what we search for). */
+  changesRequirements: boolean;
+};
+
+/**
+ * Simulates each offered answer: re-evaluate the programs' published requirements and rebuild the
+ * retrieval plan. Answers the extractor cannot read leave the context unchanged — an honest "no information".
+ */
+export function answerSplit(q: Question, ctx: CounselorContext, programs: ProgramRow[]): AnswerSplit {
+  const replies = q.quickReplies(ctx.mode);
+  const verdictKeys: string[] = [];
+  const outcomes = new Map<string, number>();
+  for (const r of replies) {
+    const next = mergeContext(ctx, ruleExtract(r.value, ctx));
+    const verdicts = programs.map((p) => requirementVerdicts(p, next)).join('|');
+    const plan = focusQueries(next, '').map((f) => f.query).join('|');
+    verdictKeys.push(verdicts);
+    const key = `${verdicts}#${plan}`;
+    outcomes.set(key, (outcomes.get(key) ?? 0) + 1);
+  }
+  return { split: entropy(outcomes, replies.length, replies.length), changesRequirements: new Set(verdictKeys).size > 1 };
 }
 
 export type QuestionChoice = {
@@ -193,13 +212,6 @@ export type QuestionChoice = {
   gain: number;
 };
 
-/**
- * Picks the single most useful next question.
- *
- * Returns null when nothing left to ask would change the outcome — the signal
- * to stop clarifying and show results, which is what prevents the infinite
- * question loop the brief warns about.
- */
 /** How many times we have put a given question to them. */
 function timesAsked(asked: string[], id: string): number {
   return asked.filter((a) => a === id).length;
@@ -207,54 +219,54 @@ function timesAsked(asked: string[], id: string): number {
 
 /** Ask twice at most; past that, silence is an answer of its own. */
 const MAX_ASKS = 2;
+/** Below this, asking costs the user more than the answer is worth. */
+const MIN_GAIN = 0.2;
+/** Total questions put before results are shown regardless — no indefinite questioning. */
+export const QUESTION_BUDGET = 4;
 
-/** Questions whose answers change the shortlist enough to be worth waiting for. */
-const DECISIVE: QuestionId[] = ['transportation', 'incomeUrgency'];
+function livePrograms(candidates: ProgramMatch[], programs: ProgramRow[]): ProgramRow[] {
+  const live = new Set(candidates.filter((c) => c.state !== 'mismatch').map((c) => c.id));
+  return programs.filter((p) => live.has(p.id));
+}
 
-export function selectNextQuestion(
-  ctx: CounselorContext,
-  candidates: ProgramMatch[],
-  asked: string[],
-): QuestionChoice | null {
-  const live = candidates.filter((c) => c.state !== 'mismatch');
-
-  const scored = QUESTIONS.filter((q) => {
+function openQuestions(ctx: CounselorContext, asked: string[]): Question[] {
+  return QUESTIONS.filter((q) => {
     if (q.applicable && !q.applicable(ctx)) return false;
     if (isAnswered(q, ctx)) return false;
     // Being asked is not the same as being answered — people often reply to
     // something else first. Allow one more attempt, then let it go rather
     // than badgering them.
     return timesAsked(asked, q.id) < MAX_ASKS;
-  }).map((q) => {
-    const buckets = new Map<string, number>();
-    for (const m of live) {
-      const key = q.partition(m);
-      buckets.set(key, (buckets.get(key) ?? 0) + 1);
-    }
-    // Blend measured split with the question's intrinsic usefulness, so a
-    // thin catalogue still asks sensible things rather than nothing.
-    const measured = entropy(buckets, live.length);
-    const base = live.length >= 3 ? measured * 0.65 + q.baseValue * 0.35 : q.baseValue;
-    // A question they already sidestepped goes behind anything still fresh.
-    const gain = timesAsked(asked, q.id) > 0 ? base * 0.5 : base;
-    return { question: q, gain };
   });
+}
 
-  if (scored.length === 0) return null;
+/**
+ * Picks the single most useful next question, or null when nothing left to ask would change the
+ * outcome — the signal to stop clarifying and show results (no infinite question loop).
+ * `programs` are the catalogue rows with their rules; without them only the retrieval plan counts.
+ */
+export function selectNextQuestion(
+  ctx: CounselorContext,
+  candidates: ProgramMatch[],
+  asked: string[],
+  programs: ProgramRow[] = [],
+): QuestionChoice | null {
+  const live = livePrograms(candidates, programs);
+  const scored = openQuestions(ctx, asked).map((q) => {
+    const { split } = answerSplit(q, ctx, live);
+    const base = split * 0.9 + q.baseValue * 0.1;
+    // A question they already sidestepped goes behind anything still fresh.
+    return { question: q, gain: timesAsked(asked, q.id) > 0 ? base * 0.5 : base };
+  });
   scored.sort((a, b) => b.gain - a.gain);
-
-  const best = scored[0]!;
-  // Below this, asking costs the user more than the answer is worth.
-  if (best.gain >= 0.25) return best;
-
-  // …except for the handful that genuinely decide the shortlist. Dropping one
-  // of these because a re-ask scored low would send us to recommendations
-  // while still missing the thing we said we needed.
-  return scored.find((x) => DECISIVE.includes(x.question.id)) ?? null;
+  const best = scored[0];
+  return best && best.gain >= MIN_GAIN ? best : null;
 }
 
 function isAnswered(q: Question, ctx: CounselorContext): boolean {
   if (q.id === 'population') return ctx.population.length > 0;
+  // "Under 18" answers the age question even without an exact age.
+  if (q.id === 'age') return ctx.age != null || Boolean(ctx.ageBand);
   const value = ctx[q.field];
   if (value === undefined || value === null) return false;
   if (Array.isArray(value)) return value.length > 0;
@@ -278,31 +290,26 @@ export function criteriaFor(ctx: CounselorContext) {
 /**
  * Whether to stop clarifying.
  *
- * Deliberately conservative: knowing three things about someone is not the
- * same as having asked the questions that actually separate the options.
- * Transport and income urgency change the shortlist more than anything else,
- * so while either is unanswered and still worth asking we keep going — that
- * is what makes this feel like a counselor rather than a form.
- *
- * `selectNextQuestion` remains the real authority: when it returns null there
- * is nothing useful left to ask and we move on regardless.
+ * Not while a decisive question is open. A question is decisive when its answer would change a
+ * live program's verdict under its published rules (service area, age range, audience, veteran status)
+ * and splits the outcomes substantially, or when every answer leads to a different next step
+ * (earn now vs. train first). Each is put at most twice, and never more than QUESTION_BUDGET
+ * questions in all. Otherwise, a few known dimensions suffice.
  */
 export function readyForResults(
   ctx: CounselorContext,
   candidates: ProgramMatch[],
   asked: string[] = [],
+  programs: ProgramRow[] = [],
 ): boolean {
+  if (asked.length >= QUESTION_BUDGET) return true;
   const applied = criteriaFor(ctx).filter((c) => c.applied).length;
-  const live = candidates.filter((c) => c.state !== 'mismatch').length;
-
-  const outstanding = DECISIVE.filter((id) => {
-    const q = QUESTIONS.find((x) => x.id === id);
-    if (!q || (q.applicable && !q.applicable(ctx))) return false;
-    if (isAnswered(q, ctx)) return false;
-    // Still worth waiting for while we may legitimately ask again.
-    return timesAsked(asked, id) < MAX_ASKS;
+  const liveCount = candidates.filter((c) => c.state !== 'mismatch').length;
+  const live = livePrograms(candidates, programs);
+  const outstanding = openQuestions(ctx, asked).some((q) => {
+    const { split, changesRequirements } = answerSplit(q, ctx, live);
+    return (changesRequirements && split >= 0.5) || split >= 0.9;
   });
-  if (outstanding.length > 0) return false;
-
-  return applied >= 3 || (live > 0 && live <= 3 && applied >= 2);
+  if (outstanding) return false;
+  return applied >= 3 || (liveCount > 0 && liveCount <= 3 && applied >= 2);
 }

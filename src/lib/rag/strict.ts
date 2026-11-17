@@ -19,6 +19,9 @@ import type { CandidateStatus, Citation, RetrievedSource, TurnDiagnostics } from
 export const NO_ANSWER_TEXT = "I couldn't find information about that in the currently indexed knowledge base.";
 export const KB_UNAVAILABLE_TEXT =
   "I can't reach the knowledge base right now, so I can't answer that. Please try again in a moment.";
+/** The model produced nothing usable (even after the bounded retry). Not a claim about the index. */
+export const GENERATION_FAILED_TEXT =
+  "I found indexed material that may be relevant, but I couldn't produce a verified answer just now. Please try asking again.";
 export const SMALL_TALK_TEXT = "Hello! Ask me a question and I'll answer it from the indexed knowledge base.";
 /** What the model must output, verbatim, when the sources do not answer the question. */
 export const NO_ANSWER_SENTINEL = 'NO_ANSWER';
@@ -542,7 +545,8 @@ export function verifyAnswer(raw: string, used: RetrievedSource[], context: { qu
   const empty = (reason: string): Verification => ({
     noAnswer: true,
     reason,
-    answer: NO_ANSWER_TEXT,
+    // An empty generation says nothing about the index, so it must not read as "nothing indexed".
+    answer: reason === 'model_returned_nothing' && used.length > 0 ? GENERATION_FAILED_TEXT : NO_ANSWER_TEXT,
     citations: [],
     citationMap: [],
     unsupported: [],

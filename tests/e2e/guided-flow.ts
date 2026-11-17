@@ -13,6 +13,7 @@ import { prisma } from '../../src/lib/db';
 import { env } from '../../src/lib/env';
 import { getQdrant } from '../../src/lib/vector/qdrant';
 import { NO_ANSWER_TEXT, contentTerms, lexicalCoverage, splitSentences, stemSet } from '../../src/lib/rag/strict';
+import { namedIn } from '../../src/lib/programs/link';
 import type { AssistantPayload } from '../../src/types/chat';
 
 const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3100';
@@ -78,7 +79,11 @@ async function verifyCards(t: Turn): Promise<{ ok: boolean; why: string }> {
   const rows = await prisma.documentChunk.findMany({ where: { id: { in: cited } }, include: { document: { select: { title: true } } } });
   const text = rows.map((r) => `${r.document.title} ${r.content}`).join('\n').replace(/\s+/g, ' ').toLowerCase();
   for (const r of t.payload.recommendations) {
-    if (!text.includes(r.name.toLowerCase())) return { ok: false, why: `card "${r.name}" is not named in any cited chunk` };
+    // The card's program must be linked (ProgramDocument) to a cited chunk's document, and that chunk must name it.
+    const program = await prisma.program.findUnique({ where: { slug: r.slug ?? '' }, include: { documents: true } });
+    if (!program) return { ok: false, why: `card "${r.name}" is not a catalogue program` };
+    const linked = rows.filter((row) => program.documents.some((d) => d.documentId === row.documentId));
+    if (!linked.some((row) => namedIn(`${row.headingPath ?? ''} ${row.content}`, program))) return { ok: false, why: `card "${r.name}" is not named in a cited chunk of a linked document` };
     if (!text.includes(r.shortDescription.replace(/…$/, '').replace(/\s+/g, ' ').toLowerCase().slice(0, 80))) return { ok: false, why: `card "${r.name}" description is not quoted from a cited chunk` };
     if (!r.requiresVerification) return { ok: false, why: `card "${r.name}" does not defer eligibility to staff` };
   }
@@ -115,7 +120,7 @@ const questions = (s: string) => (s.match(/\?/g) ?? []).length;
     const v3 = await verifyCitations(a3);
     check('A3: recommendations are cited, and every citation maps to its PostgreSQL chunk, document and Qdrant vector', v3.ok, v3.why);
     const c3 = await verifyCards(a3);
-    check('A3: recommendation cards only name programs a cited chunk names, quoted verbatim', c3.ok, c3.why);
+    check('A3: cards only for programs linked to a cited document and named in the cited chunk, quoted verbatim', c3.ok, c3.why);
     check('A3: eligibility uncertainty kept inside the answer; urgency remembered', /confirmed by Golden Sierra staff/.test(a3.answer) && /income/i.test(f3.knownFacts.incomeUrgency ?? ''), a3.answer.slice(-400));
     check('A3: no fabricated combined GED + healthcare program', !/(GED|diploma)[^.\n]*healthcare[^.\n]*program|healthcare[^.\n]*(GED|diploma)[^.\n]*program/i.test(a3.answer.replace(/I searched[^\n]*\n/, '').replace(/I didn't find[^\n]*/, '')), a3.answer);
 

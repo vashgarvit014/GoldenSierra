@@ -9,7 +9,8 @@ import { changedFields, extractContext, mergeContext } from '../counselor/extrac
 import { buildKnownFacts, loadPrograms, matchPrograms, rankMatches } from '../counselor/matching';
 import { QUESTIONS, readyForResults, selectNextQuestion, type Question } from '../counselor/questions';
 import { completeTurn, type PreparedTurn } from '../rag/generate';
-import { NO_ANSWER_TEXT } from '../rag/strict';
+import { GENERATION_FAILED_TEXT, NO_ANSWER_TEXT } from '../rag/strict';
+import { completeAnswer } from '../ai/complete';
 import { cardsFromCitations, prepareGuidedResults, type Focus } from './evidence';
 import { SUBJECT, type CounselorContext, type QuickReply } from '@/types/counselor';
 import type { AssistantPayload, ChatTurn } from '@/types/chat';
@@ -259,8 +260,10 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
 
   // ── decide: one more question, or results ──
   let matches: ReturnType<typeof rankMatches> = [];
+  let programs: Awaited<ReturnType<typeof loadPrograms>> = [];
   try {
-    matches = rankMatches(matchPrograms(await loadPrograms(), ctx));
+    programs = await loadPrograms();
+    matches = rankMatches(matchPrograms(programs, ctx));
   } catch (err) {
     logger.warn('Program catalogue unavailable for question selection', { error: String(err) });
   }
@@ -270,14 +273,14 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     early ||
     (hadResults && contextChanged) ||
     asked.length >= MAX_CLARIFYING ||
-    readyForResults(ctx, matches, asked);
+    readyForResults(ctx, matches, asked, programs);
   // Never put the same question twice in a row: if the reply answered something else, move on to the
   // next most useful question; if nothing else is worth asking, show results rather than badger.
   const pending = input.flow.pendingQuestion;
-  const fresh = ready ? null : selectNextQuestion(ctx, matches, pending ? [...asked, pending, pending] : asked);
+  const fresh = ready ? null : selectNextQuestion(ctx, matches, pending ? [...asked, pending, pending] : asked, programs);
   // …except a decisive question the reply left unanswered, which is put once more (it is the one that
   // separates job-search help from training), acknowledging what they did say first.
-  const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked) : null;
+  const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked, programs) : null;
   const choice = fresh ?? (reask?.question.id === pending ? reask : null);
   const subject = SUBJECT[ctx.mode];
 
@@ -303,24 +306,16 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   path.push(ready1);
   // After results, a follow-up that adds nothing new is searched in its own words alongside the context.
   const extra = hadResults && !contextChanged && !early ? input.message : undefined;
-  const { prepared, focuses, focusOf } = await prepareGuidedResults(ctx, input.message, extra);
-  const rawAnswer = prepared.preAnswer === null ? await generate(prepared) : '';
-  const done = await completeTurn(prepared, rawAnswer, prepared.diagnostics.query, started);
-  const answered = done.answer !== NO_ANSWER_TEXT && done.payload.citations.length > 0;
   const stage = transition(ready1, { type: 'RESULTS_SHOWN', hadResults });
   path.push(stage);
 
   const uncertainties = uncertaintiesFor(ctx);
   // One refinement question at most, and only one that has not been asked twice already.
-  const nextRefine = uncertainties.length ? selectNextQuestion(ctx, matches, asked) : null;
+  const nextRefine = uncertainties.length ? selectNextQuestion(ctx, matches, asked, programs) : null;
   const refine = nextRefine && uncertainties.includes(UNCERTAINTY[nextRefine.question.id] ?? '') ? nextRefine : null;
-  const recommendations = answered ? await cardsFromCitations(done.payload, focusOf, ctx.mode) : [];
-
-  // Needs that no cited passage speaks to are said plainly, rather than implied to be covered.
-  const citedChunks = new Set(done.payload.citations.flatMap((c) => c.chunkIds ?? []));
-  const covered = new Set([...citedChunks].map((id) => focusOf.get(id)?.key).filter(Boolean));
-  const uncovered = answered ? focuses.filter((f) => !covered.has(f.key)).map((f) => f.label) : [];
-  const answer = composeResults({ ctx, focuses, verified: done.answer, answered, corrections, uncertainties, uncovered, refine: refine?.question.prompt(ctx.mode, ctx) ?? null });
+  const { answer, done, prepared, recommendations, answered, focuses } = await verifiedResults({
+    ctx, message: input.message, extra, started, corrections, uncertainties, refine: refine?.question.prompt(ctx.mode, ctx) ?? null,
+  });
   const flow: FlowState = {
     stage, context: ctx,
     askedQuestions: refine ? [...asked, refine.question.id] : asked,
@@ -343,6 +338,33 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   return { answer, payload, flow, prepared, path };
 }
 
+/**
+ * RETRIEVE + RECOMMEND, shared by the admin guided chat and the public counselor (/api/session):
+ * focused retrieval over PostgreSQL-validated chunks, one bounded generation, claim-by-claim
+ * verification with rebuilt citations, and cards only for linked programs a cited chunk names.
+ */
+export async function verifiedResults(a: {
+  ctx: CounselorContext;
+  message: string;
+  extra?: string;
+  started: number;
+  corrections: string[];
+  uncertainties: string[];
+  refine: string | null;
+}) {
+  const { prepared, focuses, focusOf } = await prepareGuidedResults(a.ctx, a.message, a.extra);
+  const rawAnswer = prepared.preAnswer === null ? await generate(prepared) : '';
+  const done = await completeTurn(prepared, rawAnswer, prepared.diagnostics.query, a.started);
+  const answered = done.answer !== NO_ANSWER_TEXT && done.payload.citations.length > 0;
+  const recommendations = answered ? await cardsFromCitations(done.payload, focusOf, a.ctx.mode) : [];
+  // Needs that no cited passage speaks to are said plainly, rather than implied to be covered.
+  const citedChunks = new Set(done.payload.citations.flatMap((c) => c.chunkIds ?? []));
+  const covered = new Set([...citedChunks].map((id) => focusOf.get(id)?.key).filter(Boolean));
+  const uncovered = answered ? focuses.filter((f) => !covered.has(f.key)).map((f) => f.label) : [];
+  const answer = composeResults({ ctx: a.ctx, focuses, verified: done.answer, answered, corrections: a.corrections, uncertainties: a.uncertainties, uncovered, refine: a.refine });
+  return { answer, done, prepared, recommendations, answered, focuses };
+}
+
 /** Deterministic lead-in + the verified answer + what is still open. Only the verified part states facts. */
 export function composeResults(a: {
   ctx: CounselorContext;
@@ -361,7 +383,7 @@ export function composeResults(a: {
   const parts: string[] = [];
   const updated = a.corrections.length ? "Thanks — I've updated that. " : '';
   if (!a.answered) {
-    parts.push(`${updated}I searched the indexed knowledge base for ${list}.`, NO_ANSWER_TEXT);
+    parts.push(`${updated}I searched the indexed knowledge base for ${list}.`, a.verified === GENERATION_FAILED_TEXT ? GENERATION_FAILED_TEXT : NO_ANSWER_TEXT);
   } else {
     parts.push(`${updated}Based on what you've shared, I searched the indexed sources for ${list}. Here is what they describe:`, a.verified);
     if (a.uncovered?.length) parts.push(`I didn't find indexed information on ${join(a.uncovered)}.`);
@@ -391,37 +413,10 @@ function basePayload(started: number, flow: FlowPayload): AssistantPayload {
   };
 }
 
-/**
- * One strict generation over the guided evidence. mercury-3 reasons before it writes, and on a
- * multi-need question that reasoning alone can exhaust the budget (finish_reason=length, empty
- * content — observed 2 in 6 runs). Low reasoning effort keeps it inside the budget; an empty reply
- * is retried once with double the budget, and anything still empty stays a refusal.
- */
+/** One strict generation over the guided evidence, bounded (see ai/complete.ts). */
 async function generate(prepared: PreparedTurn): Promise<string> {
   if (!hasLlm()) return '';
-  const call = async (maxTokens: number) => {
-    const response = await withTimeout(
-      getLlmClient().chat.completions.create({
-        model: env.LLM_MODEL,
-        temperature: 0,
-        max_tokens: maxTokens,
-        messages: prepared.messages,
-        reasoning_effort: 'low',
-      } as Parameters<ReturnType<typeof getLlmClient>['chat']['completions']['create']>[0] & { stream?: false }),
-      45_000,
-      'guided answer generation',
-    );
-    return { text: response.choices[0]?.message?.content?.trim() ?? '', finish: response.choices[0]?.finish_reason };
-  };
-  try {
-    const first = await call(env.LLM_MAX_TOKENS);
-    if (first.text || first.finish !== 'length') return first.text;
-    logger.warn('Guided answer was cut off before any text; retrying once with a larger budget');
-    return (await call(env.LLM_MAX_TOKENS * 2)).text;
-  } catch (err) {
-    logger.error('Guided answer generation failed', { error: err instanceof Error ? err.message : String(err) });
-    return '';
-  }
+  return (await completeAnswer(prepared.messages, { label: 'guided answer generation' })).text;
 }
 
 /** Structured part for a turn handled by the strict factual pipeline: the guided state is left as it was. */

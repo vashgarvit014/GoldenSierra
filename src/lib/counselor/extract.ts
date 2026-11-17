@@ -51,8 +51,13 @@ export function cleanInterest(value: string): string {
 }
 
 /** Rule-based extraction. Always runs; never throws. */
-export function ruleExtract(message: string, ctx: CounselorContext): Partial<CounselorContext> {
-  const out: Partial<CounselorContext> = {};
+export type ContextUpdate = Partial<CounselorContext> & {
+  /** Population tags the message explicitly negates ("he's not a veteran"); removed on merge. */
+  withdrawn?: PopulationTag[];
+};
+
+export function ruleExtract(message: string, ctx: CounselorContext): ContextUpdate {
+  const out: ContextUpdate = {};
   const text = message.trim();
   const lower = text.toLowerCase();
 
@@ -62,8 +67,11 @@ export function ruleExtract(message: string, ctx: CounselorContext): Partial<Cou
   // ── Age ──
   const ageMatch =
     /\b(\d{1,2})[- ]?(?:year|yr)s?[- ]?old\b/i.exec(text) ??
-    /\b(?:she|he|they|i)(?:'s| is| am)\s+(\d{1,2})\b/i.exec(text) ??
-    /\bage[d]?\s+(\d{1,2})\b/i.exec(text);
+    /\b(\d{1,2})\s*(?:y\/?o|yrs?)\b/i.exec(text) ??
+    /\bturned (\d{1,2})\b/i.exec(text) ??
+    /\b(?:she|he|they|i)(?:'s| is| am| are)\s+(?:only |now |just |about )?(\d{1,2})\b(?!\s*(?:hours|days|weeks|months|miles|minutes|%))/i.exec(text) ??
+    /\b(?:son|daughter|client|nephew|niece|brother|sister|friend|student|grandson|granddaughter),?\s+(?:who is |aged? )?(\d{1,2})\b(?!\s*(?:hours|days|weeks|months|miles))/i.exec(text) ??
+    /\bage[d]?\s+(\d{1,2})\b(?!\s*(?:to|-|or))/i.exec(text);
   if (ageMatch) {
     const age = Number(ageMatch[1]);
     if (age > 0 && age < 100) {
@@ -76,62 +84,77 @@ export function ruleExtract(message: string, ctx: CounselorContext): Partial<Cou
   else if (/\b25 to 54|25-54\b/i.test(text)) out.ageBand = '25_54';
   else if (/\b55 (or older|\+)\b/i.test(text)) out.ageBand = '55_plus';
 
-  // ── Location ──
-  if (/\bplacer\b/i.test(text)) out.county = 'Placer';
-  else if (/\bel\s*dorado\b/i.test(text)) out.county = 'El Dorado';
-  else if (/\balpine\b/i.test(text)) out.county = 'Alpine';
-  for (const [city, county] of Object.entries(CITY_TO_COUNTY)) {
-    if (lower.includes(city)) {
+  // ── Location ── ("I meant El Dorado, not Placer": a place that is negated is not where they are)
+  const placeText = lower.replace(/\b(?:not|instead of|rather than|no longer in|moved (?:away )?from|used to live in)\s+(?:in\s+)?([a-z]+(?:\s+[a-z]+)?)/g, ' ');
+  if (/\bplacer\b/.test(placeText)) out.county = 'Placer';
+  else if (/\bel\s*dorado\b/.test(placeText)) out.county = 'El Dorado';
+  else if (/\balpine\b/.test(placeText)) out.county = 'Alpine';
+  // Longest names first, so "el dorado hills" is not read as the county alone.
+  for (const [city, county] of Object.entries(CITY_TO_COUNTY).sort((x, y) => y[0].length - x[0].length)) {
+    if (placeText.includes(city)) {
       out.city = city;
-      out.county ??= county;
+      // A named town decides the county unless a county is stated separately.
+      if (!out.county || !/\bcounty\b/.test(placeText)) out.county = county;
       break;
     }
   }
 
-  // ── Population ──
+  // ── Population ── (a negated mention — "he's not a veteran" — withdraws the tag instead)
   const pops = new Set<PopulationTag>(out.population ?? []);
-  for (const [pattern, tag] of POPULATION_PATTERNS) if (pattern.test(text)) pops.add(tag);
+  const withdrawn: PopulationTag[] = [];
+  for (const [pattern, tag] of POPULATION_PATTERNS) {
+    const m = pattern.exec(text);
+    if (!m) continue;
+    const before = text.slice(Math.max(0, m.index - 24), m.index);
+    if (/\b(?:not|isn'?t|wasn'?t|never (?:was|been)|no longer)\s+(?:a |an |in |from )?$/i.test(before)) withdrawn.push(tag);
+    else pops.add(tag);
+  }
   if (pops.size) out.population = [...pops];
+  if (withdrawn.length) out.withdrawn = withdrawn;
 
-  // ── Education ── (negation first: "hasn't completed her GED. She has…" must not read as completed)
-  if (/\b(hasn'?t|has not|have not|haven'?t|didn'?t|did not|not|never|no|without)\b.{0,30}\b(ged|hiset|high school|diploma)\b|\b(ged|diploma)\s+(is\s+)?(incomplete|unfinished|not (done|finished|complete))/i.test(text)) out.education = 'no_hs_diploma';
-  else if (/\b(working on|still doing|studying for|in progress).{0,20}\b(ged|hiset|diploma)\b/i.test(text)) out.education = 'working_on_ged';
-  else if (/\b(ged|hiset|high school)\b.{0,30}\b(completed?|finished|done|passed)\b|\b(completed?|finished|passed|got|has|have)\s+(her|his|their|my)?\s*(ged|hiset|high school diploma|high school|diploma)\b/i.test(text)) out.education = 'ged_or_hs';
-  else if (/\bsome college\b/i.test(text)) out.education = 'some_college';
-  else if (/\b(degree|bachelor|associate)\b/i.test(text)) out.education = 'degree';
+  // ── Education ── (in progress, then negation, then completion: "hasn't completed her GED" is not done)
+  if (/\b(working on|studying for|taking|enrolled in|attending|signed up for|in)\s+(?:a |an |her |his |their |my |the )?(ged|hiset)\b|\b(ged|hiset)\s+(classes|prep|program|course)/i.test(text) && !/\b(not|never|isn'?t|hasn'?t)\b.{0,20}\b(ged|hiset)\s+(classes|prep|program|course)/i.test(text)) out.education = 'working_on_ged';
+  else if (/\b(hasn'?t|has not|have not|haven'?t|didn'?t|did not|not|never|no|without)\b.{0,30}\b(ged|hiset|high school|diploma)\b|\bdropped out\b|\b(ged|diploma)\s+(is\s+)?(incomplete|unfinished|not (done|finished|complete))/i.test(text)) out.education = 'no_hs_diploma';
+  else if (/\b(ged|hiset|high school)\b.{0,30}\b(completed?|finished|done|passed)\b|\b(completed?|finished|passed|got|has|have|earned)\s+(her|his|their|my|the|a)?\s*(ged|hiset|high school diploma|high school|diploma)\b|\bgraduated( from)? high school\b|\bhigh school (grad|graduate)\b/i.test(text)) out.education = 'ged_or_hs';
+  else if (/\bsome college\b|\bcommunity college\b|\bcollege (classes|courses|credits)\b/i.test(text)) out.education = 'some_college';
+  else if (/\b(degree|bachelor|associate|graduated (from )?college)\b/i.test(text)) out.education = 'degree';
 
-  // ── Transportation ──
-  if (/\bno (reliable )?(transport|car|vehicle|way to get)|can'?t drive|doesn'?t drive|without a car\b/i.test(text)) out.transportation = 'none';
-  else if (/\b(bus|transit|public transport)( only)?\b/i.test(text)) out.transportation = 'transit_only';
-  else if (/\b(has|have|got) (a |her |his |their |my )?(car|vehicle)\b|own car|can drive|own vehicle|reliable transport\b/i.test(text)) out.transportation = 'own_vehicle';
+  // ── Transportation ── (negation first: "doesn't have a car" must not read as "has a car")
+  const NEG_HAVE = String.raw`(?:no|without(?: a)?|doesn'?t have(?: a)?|does not have(?: a)?|don'?t have(?: a)?|do not have(?: a)?|hasn'?t got(?: a)?|lost (?:her|his|their|my))`;
+  if (new RegExp(String.raw`\b${NEG_HAVE}\s+(?:reliable |own |a )?(?:transport\w*|car|vehicle|ride|license|licence|way to get)|can'?t drive|cannot drive|doesn'?t drive|does not drive|don'?t drive`, 'i').test(text)) out.transportation = 'none';
+  else if (/\b(takes?|taking|rides?|uses?|relies on|relying on|by)\s+(?:the )?(bus|transit|light rail|public transport\w*)|\b(bus|transit|public transport\w*)\s+only\b|\bpublic transit\b|\bonly (?:the )?bus\b/i.test(text)) out.transportation = 'transit_only';
+  else if (/\b(has|have|got)\s+(?:a |her |his |their |my )?(?:own )?(?:car|vehicle)\b|\bown car|\bcan drive|\bdrives\b|\bown vehicle|\breliable transport/i.test(text)) out.transportation = 'own_vehicle';
 
   // ── Income urgency ──
-  if (/\bneeds? (income|money|a job|work|to earn) (now|soon|right away|asap|quickly|immediately)|income as soon|\burgent(ly)?\b|as soon as possible|right away|immediately/i.test(text)) out.incomeUrgency = 'immediate';
-  else if (/\bcan (focus on |do )?train|train first|few months|no rush\b/i.test(text)) out.incomeUrgency = 'can_train_first';
-  else if (/\bopen to (both|either)\b/i.test(text)) out.incomeUrgency = 'flexible';
+  if (/\bneeds? (?:income|money|a job|work|to earn|a paycheck) (?:now|soon|right away|asap|quickly|fast|immediately)|income as soon|\burgent(?:ly)?\b|as soon as possible|right away|immediately|\basap\b|\bpaycheck (?:asap|now|soon|fast)|\bmoney fast\b|\bbills (?:are )?(?:due|piling)|\bcan'?t afford to wait|\bbehind on rent\b/i.test(text)) out.incomeUrgency = 'immediate';
+  else if (/\bcan (?:focus on |do |afford to )?train|\btrain(?:ing)? first|few months|\bno rush\b|\bnot in a (?:hurry|rush)\b|\bhas savings\b|\bcan wait\b/i.test(text)) out.incomeUrgency = 'can_train_first';
+  else if (/\bopen to (?:both|either)\b/i.test(text)) out.incomeUrgency = 'flexible';
 
-  // ── Employment ──
-  if (/\bunemployed|not working|out of work|no job|jobless\b/i.test(text)) out.employmentStatus = 'unemployed';
-  else if (/\blaid off|layoff|let go\b/i.test(text)) out.employmentStatus = 'laid_off';
-  else if (/\bworking but|part[- ]time|need more hours|underemployed\b/i.test(text)) out.employmentStatus = 'underemployed';
+  // ── Employment ── (a layoff is its own status; it decides dislocated-worker services)
+  if (/\blaid off|\blayoff|\blet go\b/i.test(text)) out.employmentStatus = 'laid_off';
+  else if (/\bunemployed|\bnot (?:currently |presently |even )?working|\bout of work|\bno job\b|\bjobless|\bbetween jobs|\blost (?:her|his|their|my) job|\bgot fired\b|\b(?:isn'?t|aren'?t|is not) working\b/i.test(text)) out.employmentStatus = 'unemployed';
+  else if (/\bworking but|\bpart[- ]time|\bneed more hours|\bunderemployed\b/i.test(text)) out.employmentStatus = 'underemployed';
+  else if (/\b(?:found|got|started) a (?:new |full[- ]time )?job\b|\bworks full[- ]time|\bis (?:currently )?employed\b/i.test(text)) out.employmentStatus = 'employed';
   else if (/\bstudent|in school\b/i.test(text)) out.employmentStatus = 'student';
 
   // ── Career interest ──
   const interest =
     /\b(?:interested in|wants? to (?:work|go) in|career in|looking at|aiming for|get into|pathway (?:in|to))\s+([a-z][a-z\s&/-]{2,34})/i.exec(text);
-  if (interest?.[1]) {
+  const occupation = /\b(?:become|be|work as|training to be)\s+an?\s+([a-z][a-z\s-]{2,30})/i.exec(text);
+  if (/\bstill deciding\b|\bundecided\b|\b(?:not sure|no idea|doesn'?t know|don'?t know|unsure)\s+what (?:kind of )?(?:work|job|career)/i.test(text)) out.careerInterest = 'still deciding';
+  else if (interest?.[1]) {
     // Stop at a clause boundary — "healthcare but hasn't finished her GED"
     // must not become a career interest of "healthcare but hasn".
     out.careerInterest = cleanInterest(interest[1]);
-  }
-  else if (/\bhealthcare|nursing|medical|cna\b/i.test(text)) out.careerInterest = 'healthcare';
-  else if (/\btrades?|construction|welding|electric|plumb|forklift\b/i.test(text)) out.careerInterest = 'the trades';
-  else if (/\boffice|admin|clerical|bookkeep\b/i.test(text)) out.careerInterest = 'office work';
+  } else if (/\bhealthcare|nursing|\bnurse|medical|\bcna\b|caregiv|phlebotom|pharmacy tech|dental assist/i.test(text)) out.careerInterest = 'healthcare';
+  else if (/\btrades?\b|construction|welding|welder|electrician|electric|plumb|carpent|hvac|mechanic|forklift/i.test(text)) out.careerInterest = 'the trades';
+  else if (/\boffice|admin|clerical|bookkeep|receptionist/i.test(text)) out.careerInterest = 'office work';
   else if (/\bit\b|tech|software|cyber|comput/i.test(text)) out.careerInterest = 'technology';
+  else if (occupation?.[1]) out.careerInterest = cleanInterest(occupation[1]);
 
   // ── Audience ──
-  if (/\b(my|our) (business|company|staff|team)\b|\bi(?:'m| am) an employer\b|\bhiring for\b/i.test(text)) out.audience = 'employer';
-  else if (/\b(looking for work|need a job|find (me )?a job|helping (a|an|someone|my))\b/i.test(text)) out.audience = 'job_seeker';
+  if (/\b(my|our) (business|company|staff|team|restaurant|shop|store|clinic|firm)\b|\bi(?:'m| am) an employer\b|\bhiring for\b|\b(?:need|needs|looking|want|wants|trying|plan(?:ning)?) to hire\b|\bwe(?:'re| are) hiring\b|\bi (?:own|run|manage) (?:a|an|the|my) (?:\w+ )?(?:business|company|restaurant|shop|store|firm|practice|clinic|farm|bakery|cafe|salon)\b/i.test(text)) out.audience = 'employer';
+  else if (/\b(looking for (?:a )?(?:work|job)|need(?:s)? (?:a )?(?:job|work)|find (?:me |her |him |them )?a job|job hunting|helping (a|an|someone|my))\b/i.test(text) || out.employmentStatus === 'laid_off' || out.employmentStatus === 'unemployed') out.audience = 'job_seeker';
 
   // ── Barriers ──
   const barriers = new Set(ctx.barriers ?? []);
@@ -186,7 +209,7 @@ export async function extractContext(
   message: string,
   ctx: CounselorContext,
   history: { role: string; content: string }[],
-): Promise<{ updates: Partial<CounselorContext>; corrections: string[] }> {
+): Promise<{ updates: ContextUpdate; corrections: string[] }> {
   const baseline = ruleExtract(message, ctx);
   if (!hasLlm()) return { updates: baseline, corrections: [] };
 
@@ -227,46 +250,42 @@ export async function extractContext(
     );
     if (!data) return { updates: baseline, corrections: [] };
 
-    // Model output layers over the rule baseline, never replaces it wholesale.
-    const merged: Partial<CounselorContext> = { ...baseline };
+    // Model output only fills gaps the rules left. A field the rules matched explicitly is not the
+    // model's to reinterpret, and a fact already known may only be changed by the model when it
+    // reports that field as a correction — otherwise it is echoing "Already known" or guessing.
+    const corrected = new Set((data.corrections ?? []).map((c) => c.trim()));
+    const merged: ContextUpdate = { ...baseline };
+    const take = <K extends keyof CounselorContext>(key: K, value: CounselorContext[K] | undefined) => {
+      if (value === undefined || value === null || baseline[key] !== undefined) return;
+      const known = ctx[key];
+      if (known !== undefined && known !== null && known !== value && !corrected.has(key)) return;
+      merged[key] = value;
+    };
     if (data.age != null) {
-      merged.age = data.age;
-      merged.ageBand = data.age < 18 ? 'under_18' : data.age < 25 ? '18_24' : data.age < 55 ? '25_54' : '55_plus';
+      take('age', data.age);
+      if (merged.age === data.age) merged.ageBand = data.age < 18 ? 'under_18' : data.age < 25 ? '18_24' : data.age < 55 ? '25_54' : '55_plus';
     }
     // Location is only taken from the model when the message actually names a place — it otherwise
     // "remembers" or guesses one (a correction about a car once moved the person to another county).
     const namesPlace = /\bcounty\b|placer|el\s*dorado|alpine/i.test(message) || Object.keys(CITY_TO_COUNTY).some((c) => message.toLowerCase().includes(c));
-    const county = normaliseCounty(data.county);
-    if (county && namesPlace) merged.county = county;
-    if (data.city && message.toLowerCase().includes(data.city.toLowerCase())) merged.city = data.city.toLowerCase();
+    if (namesPlace) take('county', normaliseCounty(data.county));
+    if (data.city && message.toLowerCase().includes(data.city.toLowerCase())) take('city', data.city.toLowerCase());
     if (data.careerInterest) {
       const cleaned = cleanInterest(data.careerInterest);
-      if (cleaned.length >= 3) merged.careerInterest = cleaned;
+      if (cleaned.length >= 3) take('careerInterest', cleaned);
     }
-    if (isOneOf(data.education, ['no_hs_diploma', 'working_on_ged', 'ged_or_hs', 'some_college', 'degree'])) {
-      merged.education = data.education as CounselorContext['education'];
-    }
-    if (isOneOf(data.employmentStatus, ['unemployed', 'employed', 'underemployed', 'laid_off', 'student'])) {
-      merged.employmentStatus = data.employmentStatus as CounselorContext['employmentStatus'];
-    }
-    // An explicit statement matched by the rules ("no reliable transport") is
-    // not the model's to reinterpret; it only fills the gap when rules found none.
-    if (!baseline.transportation && isOneOf(data.transportation, ['own_vehicle', 'transit_only', 'none'])) {
-      merged.transportation = data.transportation as CounselorContext['transportation'];
-    }
-    if (isOneOf(data.incomeUrgency, ['immediate', 'can_train_first', 'flexible'])) {
-      merged.incomeUrgency = data.incomeUrgency as CounselorContext['incomeUrgency'];
-    }
-    if (isOneOf(data.audience, ['job_seeker', 'employer'])) {
-      merged.audience = data.audience as CounselorContext['audience'];
-    }
+    if (isOneOf(data.education, ['no_hs_diploma', 'working_on_ged', 'ged_or_hs', 'some_college', 'degree'])) take('education', data.education as CounselorContext['education']);
+    if (isOneOf(data.employmentStatus, ['unemployed', 'employed', 'underemployed', 'laid_off', 'student'])) take('employmentStatus', data.employmentStatus as CounselorContext['employmentStatus']);
+    if (isOneOf(data.transportation, ['own_vehicle', 'transit_only', 'none'])) take('transportation', data.transportation as CounselorContext['transportation']);
+    if (isOneOf(data.incomeUrgency, ['immediate', 'can_train_first', 'flexible'])) take('incomeUrgency', data.incomeUrgency as CounselorContext['incomeUrgency']);
+    if (isOneOf(data.audience, ['job_seeker', 'employer'])) take('audience', data.audience as CounselorContext['audience']);
 
     const valid: PopulationTag[] = [
       'former_foster_youth', 'veteran', 'youth', 'disability',
       'low_income', 'dislocated_worker', 'english_learner', 'justice_involved',
     ];
     const pops = new Set<PopulationTag>([...(baseline.population ?? [])]);
-    for (const p of data.population) if (valid.includes(p as PopulationTag)) pops.add(p as PopulationTag);
+    for (const p of data.population) if (valid.includes(p as PopulationTag) && !baseline.withdrawn?.includes(p as PopulationTag)) pops.add(p as PopulationTag);
     if (pops.size) merged.population = [...pops];
 
     if (data.barriers.length) {
@@ -285,10 +304,11 @@ export async function extractContext(
 /** Later statements win, so a user can correct themselves naturally. */
 export function mergeContext(
   current: CounselorContext,
-  updates: Partial<CounselorContext>,
+  updates: ContextUpdate,
 ): CounselorContext {
   const next: CounselorContext = { ...current };
-  for (const [key, value] of Object.entries(updates) as [keyof CounselorContext, unknown][]) {
+  const { withdrawn, ...fields } = updates;
+  for (const [key, value] of Object.entries(fields) as [keyof CounselorContext, unknown][]) {
     if (value === undefined || value === null || value === '') continue;
     if (Array.isArray(value)) {
       if (value.length === 0) continue;
@@ -298,6 +318,7 @@ export function mergeContext(
       (next[key] as unknown) = value;
     }
   }
+  if (withdrawn?.length) next.population = next.population.filter((p) => !withdrawn.includes(p));
   // A corrected answer must not leave its old consequence behind ("no car" → "has a car").
   if (next.transportation && next.transportation !== 'none') {
     next.barriers = (next.barriers ?? []).filter((b) => b !== 'transportation');

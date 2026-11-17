@@ -9,6 +9,7 @@ import { prisma } from '../../src/lib/db';
 import { env } from '../../src/lib/env';
 import { getQdrant } from '../../src/lib/vector/qdrant';
 import { prepareGuidedResults } from '../../src/lib/conversation/evidence';
+import { namedIn } from '../../src/lib/programs/link';
 import type { CounselorContext } from '../../src/types/counselor';
 
 const FOSTER: CounselorContext = {
@@ -54,4 +55,28 @@ describe('guided retrieval over the live index', () => {
     const careerChunks = prepared.usedSources.filter((s) => /saturation|diving/i.test(s.snippet));
     expect(careerChunks).toEqual([]);
   });
+
+  it('a GED need is not answered with a job posting that merely requires a diploma', async () => {
+    const { prepared, focusOf } = await prepareGuidedResults({ mode: 'self', population: [], barriers: [], education: 'no_hs_diploma' }, 'x');
+    for (const u of prepared.usedSources.filter((s) => focusOf.get(s.chunkId)?.key === 'education')) {
+      expect(`${u.title} ${u.snippet}`).toMatch(/\b(ged|hiset|equivalency|adult (school|education))\b/i);
+    }
+  });
 });
+
+describe('program ↔ document links', () => {
+  it('every link joins an active program to an indexed, public document on its own host whose text names it', async () => {
+    const links = await prisma.programDocument.findMany({
+      include: { program: true, document: { include: { chunks: { select: { content: true, headingPath: true } } } } },
+    });
+    expect(links.length).toBeGreaterThan(0);
+    for (const l of links) {
+      expect(l.document.status).toBe('INDEXED');
+      expect(l.document.accessLevel).toBe('PUBLIC');
+      expect(new URL(l.document.url!).hostname).toBe(new URL(l.program.officialUrl!).hostname);
+      expect(l.document.chunks.some((c) => namedIn(`${c.headingPath ?? ''} ${c.content}`, l.program))).toBe(true);
+      expect(l.document.title + l.document.url).not.toMatch(/agenda|packet|minutes|sitemap/i);
+    }
+  });
+});
+

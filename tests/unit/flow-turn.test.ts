@@ -23,6 +23,7 @@ vi.mock('@/lib/counselor/matching', async (importOriginal) => ({
 vi.mock('@/lib/db', () => ({ prisma: { program: { findMany: mocks.programs } } }));
 
 import { initialFlow, runGuidedTurn } from '@/lib/conversation/flow';
+import { runTurn } from '@/lib/counselor/engine';
 import { NO_ANSWER_TEXT } from '@/lib/rag/strict';
 
 const chunk = (id: string, title: string, text: string): RetrievedSource => ({
@@ -41,8 +42,11 @@ beforeEach(() => {
   generation = 'Job Connections is a free monthly event where job seekers learn about careers in healthcare. [2] A paid internship program is designed for young adults. [1]';
   mocks.retrieve.mockResolvedValue({ sources: [INTERNSHIP, EVENTS], vectorQueries: 1, vectorFailures: 0, filters: {}, timings: {} });
   mocks.programs.mockResolvedValue([
-    { slug: 'paid-internships', name: 'Paid Internships', category: null },
-    { slug: 'hiring-events', name: 'Hiring Events', category: null },
+    { slug: 'paid-internships', name: 'Paid Internships', category: null, documents: [{ documentId: 'd1' }] },
+    // Linked to the events document but never named in it: no card.
+    { slug: 'hiring-events', name: 'Hiring Events', category: null, documents: [{ documentId: 'd2' }] },
+    // Named in a cited chunk ("paid internship") but not linked to that document: no card.
+    { slug: 'career-counseling', name: 'Paid Internship Counseling', category: null, documents: [] },
   ]);
   mocks.llm.mockImplementation(async (req: { messages: { role: string; content: string }[] }) => {
     const system = req.messages[0]!.content;
@@ -91,7 +95,7 @@ describe('guided turn: recommendations', () => {
     const cited = out.payload.citations.flatMap((c) => c.chunkIds ?? []);
     expect(cited.length).toBeGreaterThan(0);
     expect(cited.every((id) => ['c1', 'c2'].includes(id))).toBe(true);
-    expect(out.payload.recommendations.map((r) => r.name)).toEqual(['Paid Internship']);
+    expect(out.payload.recommendations.map((r) => r.name)).toEqual(['Paid Internships']);
     expect(INTERNSHIP.snippet).toContain(out.payload.recommendations[0]!.shortDescription);
     expect(out.payload.recommendations[0]!.requiresVerification).toBe(true);
     expect(out.answer).toContain('confirmed by Golden Sierra staff');
@@ -126,5 +130,31 @@ describe('guided turn: recommendations', () => {
     expect(corrected.flow.context.county).toBe('Placer'); // unchanged facts are kept
     expect(corrected.answer).toMatch(/^Thanks — I've updated that\./);
     expect(corrected.payload.citations.length).toBeGreaterThan(0);
+  });
+});
+
+describe('public counselor (/api/session) results use the same verified pipeline', () => {
+  const publicTurn = () =>
+    runTurn({ message: FOSTER, context: { mode: 'helper', population: [], barriers: [] }, history: [], askedQuestions: [], forceResults: true });
+
+  it('the message is verified and cited, sources are exactly the citations, cards only for linked programs', async () => {
+    const { turn } = await publicTurn();
+    expect(turn.stage).toBe('results');
+    expect(turn.message).toContain('confirmed by Golden Sierra staff');
+    expect(turn.sources.length).toBeGreaterThan(0);
+    for (const s of turn.sources) expect(turn.message).toContain(`[${s.id}]`);
+    expect(turn.sources.every((s) => [INTERNSHIP.url, EVENTS.url].includes(s.url!))).toBe(true);
+    expect(turn.recommendations.map((r) => r.name)).toEqual(['Paid Internships']);
+    expect(INTERNSHIP.snippet).toContain(turn.recommendations[0]!.shortDescription);
+    expect(turn.recommendations[0]).toMatchObject({ state: 'needs_verification', officialUrl: INTERNSHIP.url, contactPhone: null, nextSteps: null });
+  });
+
+  it('unsupported model claims never reach the public user', async () => {
+    generation = 'Golden Sierra runs a CNA certification bootcamp that pays $500 per week. [1]';
+    const { turn } = await publicTurn();
+    expect(turn.message).toContain(NO_ANSWER_TEXT);
+    expect(turn.message).not.toMatch(/CNA|\$500|746-7722/);
+    expect(turn.sources).toEqual([]);
+    expect(turn.recommendations).toEqual([]);
   });
 });
