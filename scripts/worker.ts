@@ -1,7 +1,10 @@
 /**
- * BullMQ worker. Run as a separate process when REDIS_URL is configured:
+ * Ingestion worker:
  *   npm run ingest:worker
- * Without Redis the app runs jobs in-process and this worker is unnecessary.
+ * Consumes the BullMQ queue when REDIS_URL is set, and in every case polls the database for
+ * QUEUED jobs — which is how jobs arrive from a serverless app (INGESTION_RUNNER=worker) that
+ * cannot reach Redis. Jobs run one at a time; runJob's compare-and-set claim makes a job that
+ * arrives by both routes run once.
  *
  * Installed as a launchd agent by deploy/install-worker.sh, which starts it
  * at login and restarts it if it crashes.
@@ -11,14 +14,86 @@ import os from 'node:os';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { env, hasRedis } from '../src/lib/env';
-import { QUEUE_NAME } from '../src/lib/ingest/queue';
+import { JobStatus } from '@prisma/client';
+import { prisma } from '../src/lib/db';
+import { QUEUE_NAME, WORKER_HEARTBEAT_KEY, WORKER_HEARTBEAT_MS } from '../src/lib/ingest/queue';
 import { failInterruptedUploads, runJob } from '../src/lib/ingest/pipeline';
 import { logger } from '../src/lib/logger';
 import { failureContext, processDelivery } from '../src/lib/ingest/delivery';
 
-if (!hasRedis()) {
-  console.error('REDIS_URL is not set. Jobs run in-process; this worker is not needed.');
-  process.exit(1);
+/** One job at a time across both delivery routes. */
+let chain: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const next = chain.then(fn, fn);
+  chain = next.catch(() => undefined);
+  return next;
+}
+
+const POLL_MS = 5_000;
+
+/** Claims QUEUED rows straight from the database, oldest first. */
+function startDatabasePolling(): () => void {
+  let stopped = false;
+  let idle = true;
+  const tick = async () => {
+    if (stopped || !idle) return;
+    idle = false;
+    // A job still QUEUED after a run attempt (it failed before its claim) waits for the next tick
+    // instead of spinning this loop.
+    const tried = new Set<string>();
+    try {
+      for (;;) {
+        const next = await prisma.ingestionJob.findFirst({
+          where: { status: JobStatus.QUEUED, id: { notIn: [...tried] } },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        });
+        if (!next || stopped) break;
+        tried.add(next.id);
+        logger.info('Worker picked up job from the database', { jobId: next.id });
+        await serial(() => runJob(next.id)).catch((err) =>
+          logger.error('Job failed', failureContext(next.id, err)),
+        );
+      }
+    } catch (err) {
+      logger.warn('Database poll failed', failureContext(undefined, err));
+    } finally {
+      idle = true;
+    }
+  };
+  const beat = () =>
+    void prisma.systemConfig
+      .upsert({
+        where: { key: WORKER_HEARTBEAT_KEY },
+        create: { key: WORKER_HEARTBEAT_KEY, value: { host: os.hostname() }, description: 'Ingestion worker liveness' },
+        update: { value: { host: os.hostname(), at: new Date().toISOString() } },
+      })
+      .catch((err: Error) => logger.warn('Could not write worker heartbeat', { error: err.message }));
+  beat();
+  void tick();
+  const poller = setInterval(() => void tick(), POLL_MS);
+  const beater = setInterval(beat, WORKER_HEARTBEAT_MS);
+  return () => {
+    stopped = true;
+    clearInterval(poller);
+    clearInterval(beater);
+  };
+}
+
+async function mainWithoutRedis(): Promise<void> {
+  const sweep = () => void failInterruptedUploads().catch((err) => logger.warn('Upload sweep failed', failureContext(undefined, err)));
+  sweep();
+  const sweeper = setInterval(sweep, 5 * 60_000);
+  const stop = startDatabasePolling();
+  console.log('Worker polling the database for queued jobs (no REDIS_URL)…');
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      console.log(`\n${signal} received, finishing current job…`);
+      stop();
+      clearInterval(sweeper);
+      void chain.finally(() => prisma.$disconnect()).finally(() => process.exit(0));
+    });
+  }
 }
 
 /**
@@ -62,7 +137,7 @@ async function main(): Promise<void> {
     QUEUE_NAME,
     async (job, token) => {
       logger.info('Worker picked up job', { jobId: job.data.jobId, attempt: job.attemptsMade + 1 });
-      await processDelivery(job, token, runJob);
+      await serial(() => processDelivery(job, token, runJob));
     },
     {
       connection: { url: env.REDIS_URL! },
@@ -83,13 +158,15 @@ async function main(): Promise<void> {
   );
   worker.on('error', (err) => logger.error('Worker error', failureContext(undefined, err)));
 
-  console.log(`Worker listening on queue "${QUEUE_NAME}" as ${lockId}…`);
+  const stopPolling = startDatabasePolling();
+  console.log(`Worker listening on queue "${QUEUE_NAME}" and polling the database as ${lockId}…`);
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       console.log(`\n${signal} received, finishing current job…`);
       clearInterval(renew);
       clearInterval(sweeper);
+      stopPolling();
       void worker
         .close()
         // Release only a lease we still own — a lapsed one may be someone else's.
@@ -100,7 +177,7 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((err: unknown) => {
+void (hasRedis() ? main() : mainWithoutRedis()).catch((err: unknown) => {
   console.error('Worker failed to start:', err instanceof Error ? err.message : err);
   process.exit(1);
 });

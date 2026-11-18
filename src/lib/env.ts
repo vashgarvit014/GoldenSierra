@@ -46,6 +46,12 @@ const schema = z.object({
   QDRANT_COLLECTION: z.string().default('gs_knowledge'),
 
   REDIS_URL: z.string().optional(),
+  /**
+   * Where ingestion runs when there is no Redis. `inline` runs it inside the web process
+   * (local / single container). `worker` leaves it QUEUED in the database for the worker
+   * (scripts/worker.ts) to claim — required on serverless hosts, which stop after 60 s.
+   */
+  INGESTION_RUNNER: z.enum(['inline', 'worker']).default('inline'),
 
   LLM_PROVIDER: z.string().default('openai'),
   LLM_API_KEY: z.string().optional(),

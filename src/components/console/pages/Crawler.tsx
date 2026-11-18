@@ -666,8 +666,8 @@ export function Crawler() {
               {queue.waiting} job{queue.waiting === 1 ? '' : 's'} waiting, no worker running.
             </b>
             <div className="fine" style={{ marginTop: 4 }}>
-              REDIS_URL is set, so jobs are handed to the queue instead of running in-process.
-              Start the consumer with <code>npm run ingest:worker</code>.
+              Jobs are handed to a separate ingestion worker instead of running in the web server.
+              Start it with <code>npm run ingest:worker</code>, or check the hosted worker is running.
             </div>
           </div>
         )}

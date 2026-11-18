@@ -1,3 +1,5 @@
+import { JobStatus } from '@prisma/client';
+import { prisma } from '../db';
 import { env, hasRedis } from '../env';
 import { logger } from '../logger';
 import { runJob } from './pipeline';
@@ -82,6 +84,10 @@ export async function enqueueJob(jobId: string): Promise<{ mode: 'queued' | 'inl
     }
   }
 
+  // Serverless hosts stop a function after its response (60 s at most), which would cut a crawl
+  // off mid-run. The row is already QUEUED; the worker polls the database and claims it.
+  if (env.INGESTION_RUNNER === 'worker') return { mode: 'queued' };
+
   if (running.has(jobId)) return { mode: 'inline' };
   running.add(jobId);
 
@@ -122,7 +128,10 @@ export async function queueHealth(): Promise<{
         getWorkers: () => Promise<unknown[]>;
       })
     | null;
-  if (!queue) return { enabled: false, waiting: 0, active: 0, workers: 0 };
+  if (!queue) {
+    if (env.INGESTION_RUNNER === 'worker') return databaseQueueHealth();
+    return { enabled: false, waiting: 0, active: 0, workers: 0 };
+  }
 
   try {
     const [counts, workers] = await Promise.all([queue.getJobCounts(), queue.getWorkers()]);
@@ -136,6 +145,25 @@ export async function queueHealth(): Promise<{
     logger.warn('Could not read ingestion queue health', {
       error: err instanceof Error ? err.message : String(err),
     });
+    return null;
+  }
+}
+
+/** Key the worker refreshes while it is alive; read when jobs are dispatched through the database. */
+export const WORKER_HEARTBEAT_KEY = 'ingestion.workerHeartbeat';
+export const WORKER_HEARTBEAT_MS = 20_000;
+
+async function databaseQueueHealth() {
+  try {
+    const [waiting, active, beat] = await Promise.all([
+      prisma.ingestionJob.count({ where: { status: JobStatus.QUEUED } }),
+      prisma.ingestionJob.count({ where: { status: JobStatus.RUNNING } }),
+      prisma.systemConfig.findUnique({ where: { key: WORKER_HEARTBEAT_KEY }, select: { updatedAt: true } }),
+    ]);
+    const alive = beat != null && Date.now() - beat.updatedAt.getTime() < WORKER_HEARTBEAT_MS * 3;
+    return { enabled: true, waiting, active, workers: alive ? 1 : 0 };
+  } catch (err) {
+    logger.warn('Could not read database job queue health', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
