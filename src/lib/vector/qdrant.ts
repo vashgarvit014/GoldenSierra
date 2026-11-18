@@ -53,6 +53,9 @@ export function getQdrant(): QdrantClient {
   client ??= new QdrantClient({
     url: env.QDRANT_URL,
     apiKey: env.QDRANT_API_KEY || undefined,
+    // The client appends :6333 to any URL without an explicit port (including https on 443).
+    // null keeps the URL's own port, or the scheme default when it has none.
+    port: null,
     checkCompatibility: false,
   });
   return client;
