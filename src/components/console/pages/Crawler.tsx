@@ -109,6 +109,7 @@ export function Crawler() {
   const [testQuestion, setTestQuestion] = useState('');
   const [retrieval, setRetrieval] = useState<RetrievalTest | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [confirmUnindex, setConfirmUnindex] = useState<string | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadJobs = useCallback(async () => {
@@ -257,6 +258,28 @@ export function Crawler() {
       await reloadSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove the source');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Take a paused source's content out of the knowledge base, or put it back (re-indexed from stored text). */
+  async function knowledge(source: Source, action: 'remove_from_kb' | 'restore_to_kb') {
+    setBusy(`kb:${source.id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/sources/${source.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const json = (await res.json()) as { message?: string; error?: string };
+      if (!res.ok) throw new Error(apiMessage(json, 'Could not update the knowledge base'));
+      notify(json.message ?? (action === 'remove_from_kb' ? 'Removed from the knowledge base' : 'Restoring to the knowledge base'));
+      setConfirmUnindex(null);
+      await Promise.all([loadJobs(), reloadSources()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the knowledge base');
     } finally {
       setBusy(null);
     }
@@ -491,6 +514,7 @@ export function Crawler() {
                           <b>{s.documents.indexed}</b> indexed
                           {s.documents.pending > 0 && <> · {s.documents.pending} pending</>}
                           {s.documents.failed > 0 && <> · {s.documents.failed} failed</>}
+                          {s.documents.archived > 0 && s.documents.indexed === 0 && <><br />{s.documents.archived} removed from knowledge base</>}
                         </td>
                         <td>
                           <span className={statusClass(s.retrieval.state === 'not_ready' ? 'queued' : s.retrieval.state)} data-testid="retrieval-state">
@@ -520,9 +544,19 @@ export function Crawler() {
                                     {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; {s.lastCrawledAt ? 'Re-crawl' : 'Crawl'}
                                   </button>
                                 )}
-                                <button className="btn" data-action="toggle" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)} title="Pausing stops crawling; already-indexed content stays searchable">
+                                <button className="btn" data-action="toggle" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)} title="Pausing stops crawling. Its content stays searchable until you remove it from the knowledge base.">
                                   {s.status === 'PAUSED' ? 'Resume' : 'Pause'}
                                 </button>
+                                {s.status === 'PAUSED' && s.documents.indexed > 0 && (
+                                  <button className="btn" data-action="remove-from-kb" disabled={busy === `kb:${s.id}` || Boolean(runningJob)} onClick={() => setConfirmUnindex(confirmUnindex === s.id ? null : s.id)} title="Stop the chatbot from using this source's content; the source and its pages are kept">
+                                    Remove from knowledge base
+                                  </button>
+                                )}
+                                {s.documents.archived > 0 && s.documents.indexed === 0 && (
+                                  <button className="btn" data-action="restore-to-kb" disabled={busy === `kb:${s.id}` || Boolean(runningJob)} onClick={() => void knowledge(s, 'restore_to_kb')} title="Re-index this source's saved pages so the chatbot uses them again (no re-crawl)">
+                                    {busy === `kb:${s.id}` ? <span className="spin" /> : null} Restore to knowledge base
+                                  </button>
+                                )}
                                 {canDelete && (
                                   <button className="btn" data-action="remove" onClick={() => setConfirmRemove(confirmRemove === s.id ? null : s.id)}>
                                     Remove
@@ -531,6 +565,17 @@ export function Crawler() {
                               </>
                             )}
                           </div>
+                          {confirmUnindex === s.id && (
+                            <div className="info-note" style={{ marginTop: 8 }} data-testid="unindex-confirm">
+                              <b>Take “{s.name}” out of the knowledge base?</b> The chatbot will stop using its {s.documents.indexed} page{s.documents.indexed === 1 ? '' : 's'}. The source and the saved pages are kept, so you can restore it later without re-crawling.
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                <button className="btn primary" data-action="confirm-remove-from-kb" disabled={busy === `kb:${s.id}`} onClick={() => void knowledge(s, 'remove_from_kb')}>
+                                  {busy === `kb:${s.id}` ? <span className="spin" /> : null} Remove from knowledge base
+                                </button>
+                                <button className="btn" onClick={() => setConfirmUnindex(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
                           {confirmRemove === s.id && (
                             <div className="info-note" style={{ marginTop: 8 }} data-testid="remove-confirm">
                               <b>Remove “{s.name}”?</b>
