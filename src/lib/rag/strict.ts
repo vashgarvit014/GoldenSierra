@@ -496,9 +496,15 @@ export function figureSupported(claim: Figure, sentence: string, evidence: Figur
 }
 
 /** Splits on sentence ends, keeping a citation marker that follows the full stop ("... hour. [1]") with its own sentence. */
+/** Sentence openers that refer back to the previous sentence. */
+const ANAPHORIC_START = /^(all|both|each|they|these|those|it|this|that|its|their|such|the latter|the former|also|additionally|in addition)\b/i;
+/** CJK, Cyrillic, Arabic, Hebrew, Thai… — anything an English answer should not contain. */
+const NON_LATIN = /[\u0400-\u04ff\u0590-\u06ff\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+
 export function splitSentences(line: string): string[] {
   return line
-    .split(/(?<=[.!?](?:\s*\[\d+(?:\s*,\s*\d+)*\])*)\s+(?=[A-Z0-9"“(])/)
+    // Never after an initial or a common abbreviation ("S. Lake Tahoe", "Ste. 300", "St. Mary's").
+    .split(/(?<=[.!?](?:\s*\[\d+(?:\s*,\s*\d+)*\])*)(?<!(?:^|[\s(])[A-Z]\.)(?<!\b(?:Ste|St|Mt|Dr|Mr|Mrs|Ms|Jr|Sr|Inc|Ave|Blvd|Hwy|No|vs|approx|e\.g|i\.e)\.)\s+(?=[A-Z0-9"“(])/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -589,16 +595,37 @@ export function verifyAnswer(raw: string, used: RetrievedSource[], context: { qu
         .flatMap((m) => m[1]!.split(',').map((n) => Number(n.trim())))
         .filter((n) => n >= 1 && n <= used.length)
         .map((n) => n - 1);
-      const whole = sentence.replace(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*,?\s*\]/g, '').replace(/\s+([.,;:!?])/g, '$1').trim();
+      // "…listed in source [1] …" loses its marker here (citations are re-attached at the sentence end),
+      // so the words that pointed at it go too — never "in source  lists".
+      const whole = sentence
+        .replace(/\s*\b(?:(?:as )?(?:listed |shown |described |stated )?(?:in|from|according to|per|see)\s+)?(?:the\s+)?sources?\s*(?=\[\s*\d)/gi, ' ')
+        .replace(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*,?\s*\]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([.,;:!?])/g, '$1')
+        .trim();
       const { claim, gap } = peelGap(whole);
       if (claim) units.push({ sentence: claim, gap: false, cited });
       if (gap) units.push({ sentence: gap, gap: true, cited: [] });
     }
 
+    let previousRemoved = false;
     for (const unit of units) {
       sentenceIndex++;
       const { cited } = unit;
       const clean = unit.sentence;
+      // "All are located at…" / "They pay…" only make sense after the sentence they refer back to.
+      // When that sentence was removed as unsupported, its follow-on goes too rather than dangle.
+      if (previousRemoved && ANAPHORIC_START.test(clean)) {
+        unsupported.push(clean);
+        continue;
+      }
+      // Answers must be in English; a sentence in another script cannot be checked against the sources.
+      if (NON_LATIN.test(clean)) {
+        unsupported.push(clean);
+        previousRemoved = true;
+        continue;
+      }
+      previousRemoved = false;
 
       // A statement about what the documents do not say asserts nothing about the world. It may repeat the
       // user's own figures ("…whether $40,000 qualifies") but may not introduce any figure or link of its own.
@@ -644,6 +671,7 @@ export function verifyAnswer(raw: string, used: RetrievedSource[], context: { qu
 
       if (!cite) {
         unsupported.push(clean);
+        previousRemoved = true;
         if (isListItem && sentenceIndex === 0) headRemoved = true;
         continue;
       }

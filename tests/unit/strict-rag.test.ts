@@ -226,3 +226,25 @@ describe('public chat: lookups vs the counselor flow', () => {
     "I'm helping a young adult",
   ])('leaves %s to the counselor', (m) => expect(isFactualLookup(m)).toBe(false));
 });
+
+describe('citation markers inside a sentence', () => {
+  it('"listed in source [1]" never leaves a dangling "in source"', () => {
+    const job = src('j', 'Chamber job board. El Dorado Irrigation District lists a Director of Finance position. Category: Financial Services.');
+    const v = verifyAnswer('The Chamber job board in source [1] lists an El Dorado Irrigation District Director of Finance position.', [job]);
+    expect(v.answer).not.toMatch(/\bsource\b/i);
+    expect(v.answer).toMatch(/Chamber job board lists an El Dorado Irrigation District Director of Finance position\. \[1\]/);
+  });
+});
+
+describe('sentence handling', () => {
+  it('splits sentences but not after an initial or abbreviation', () => {
+    expect(splitSentences('Chambers: Divide Chamber, S. Lake Tahoe Chamber. Ste. 300 is upstairs. Next one.')).toEqual(['Chambers: Divide Chamber, S. Lake Tahoe Chamber.', 'Ste. 300 is upstairs.', 'Next one.']);
+  });
+  it('drops a follow-on sentence whose antecedent was unsupported, and any non-English sentence', () => {
+    const ev = src('e', 'El Dorado Irrigation District, 2890 Mosquito Rd., Placerville. Director of Finance. Asset Management Analyst.');
+    const v = verifyAnswer('The job board lists seven unicorn wranglers at Moonbase Corp. [1] All are located at 2890 Mosquito Rd., Placerville. [1]', [ev]);
+    expect(v.answer).not.toMatch(/All are located/);
+    const zh = verifyAnswer('根据目录，列出的商会有 El Dorado Irrigation District。[1]', [ev]);
+    expect(zh.answer).not.toMatch(/[㐀-鿿]/);
+  });
+});

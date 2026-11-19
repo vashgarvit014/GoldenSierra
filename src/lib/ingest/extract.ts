@@ -74,6 +74,12 @@ const BOILERPLATE_SELECTORS = [
 ];
 
 /** Content roots in priority order; the first that yields real text wins. */
+/** Elements whose text is emitted as one unit (headings keep their level, list items a bullet). */
+const TEXT_BLOCK_SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,blockquote,figcaption';
+const TEXT_BLOCK = /^(h[1-6]|p|li|td|th|dt|dd|blockquote|figcaption)$/;
+/** Inline elements: their text belongs on one line, never split per child. */
+const INLINE = /^(a|span|strong|b|em|i|small|label|time|abbr|cite|code|mark|u|sup|sub|address)$/;
+
 const CONTENT_SELECTORS = [
   'main',
   'article',
@@ -239,20 +245,44 @@ export function parseHtml(
  */
 function htmlToText($: cheerio.CheerioAPI, root: cheerio.Cheerio<AnyNode>): string {
   const parts: string[] = [];
+  const emit = (tag: string, content: string) => {
+    if (/^h[1-6]$/.test(tag)) parts.push(`\n${'#'.repeat(Number(tag[1]))} ${content}\n`);
+    else if (tag === 'li') parts.push(`- ${content}`);
+    else parts.push(content);
+  };
 
-  root.find('h1,h2,h3,h4,h5,h6,p,li,td,th,dt,dd,blockquote,figcaption').each((_, el) => {
-    const tag = (el as { tagName?: string }).tagName?.toLowerCase() ?? '';
-    const content = text($(el).text());
-    if (!content) return;
-
-    if (/^h[1-6]$/.test(tag)) {
-      const level = Number(tag[1]);
-      parts.push(`\n${'#'.repeat(level)} ${content}\n`);
-    } else if (tag === 'li') {
-      parts.push(`- ${content}`);
-    } else {
-      parts.push(content);
+  // Walk the tree in document order. Text elements (headings, paragraphs, list items, cells) are
+  // emitted whole. A layout element (div, section, span…) that contains none of them is emitted
+  // as one line — directories and job boards built from plain divs ("<div class=mn-title><a>Business
+  // name</a></div>") would otherwise lose every name and description and keep only stray list items.
+  const walk = (node: AnyNode) => {
+    const el = node as { type?: string; tagName?: string; data?: string; children?: AnyNode[] };
+    if (el.type === 'text') {
+      const t = text(el.data);
+      if (t) parts.push(t);
+      return;
     }
+    if (el.type !== 'tag' && el.type !== 'root') return;
+    const tag = el.tagName?.toLowerCase() ?? '';
+    // A list item or cell that wraps paragraphs is walked, so each paragraph stays its own line.
+    if (TEXT_BLOCK.test(tag) && $(node).find(TEXT_BLOCK_SELECTOR).length === 0) {
+      const content = text($(node).text());
+      if (content) emit(tag, content);
+      return;
+    }
+    if (INLINE.test(tag) || $(node).find(TEXT_BLOCK_SELECTOR).length === 0) {
+      const content = text($(node).text());
+      if (content) parts.push(content);
+      return;
+    }
+    for (const child of el.children ?? []) walk(child);
+  };
+  // Adjacent blocks often have no whitespace between them in the markup ("…Campground</p><p>Desolation…");
+  // a separator keeps their words apart when an element's text is read in one piece.
+  root.find('br').replaceWith(' ');
+  root.find('p,div,li,td,th,dt,dd,h1,h2,h3,h4,h5,h6,section,article,ul,ol,blockquote,figcaption').append(' ');
+  root.each((_, el) => {
+    for (const child of (el as { children?: AnyNode[] }).children ?? []) walk(child);
   });
 
   // Pages built entirely from divs yield nothing above; fall back to raw text.

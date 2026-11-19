@@ -107,6 +107,9 @@ Do not mention retrieval, embeddings, vector search, documents, chunks, or how y
  */
 export const STRICT_FACTUAL_PROMPT = `You answer questions using ONLY the SOURCES block in the user message. The sources are passages from an indexed knowledge base. For this task you have no other knowledge.
 
+Always write in English, whatever the language of the question's wording or the sources.
+Do not count items yourself ("three jobs") unless the sources state the number; name the items instead.
+
 ## Rules
 
 1. Use only facts that are written in the SOURCES. Never use your own or general knowledge, never guess, never fill a gap. If a detail is not in the sources, leave it out.
