@@ -89,6 +89,15 @@ describe('background and goals', () => {
   });
 });
 
+describe('work-history quick replies are understood as roles', () => {
+  it('every "What kind of work have you done before?" reply (except "none") records a past role', () => {
+    const replies = QUESTIONS.find((x) => x.id === 'workHistory')!.quickReplies('self');
+    const roles = replies.map((r) => ruleExtract(r.value, ctx()).experience ?? []);
+    expect(roles.slice(0, 3).every((r) => r.length > 0)).toBe(true);
+    expect(ruleExtract(replies[3]!.value, ctx()).workHistory).toBe('none');
+  });
+});
+
 describe('qualification questions follow the role they described', () => {
   const m = (id: string, kind: JobMatch['kind'], relation: JobMatch['relation'] = 'related') => ({ id, kind, relation, listingStatus: 'open' }) as unknown as JobMatch;
   it('exact-role listings when present, otherwise related ones; never same-field or transferable', () => {

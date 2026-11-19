@@ -67,7 +67,7 @@ export const OCCUPATIONS: Occupation[] = [
 
   // ── Administrative ──
   { key: 'admin_assistant', title: 'Administrative assistant', sector: 'administrative', collar: 'white',
-    titles: ['administrative assistant', 'office assistant', 'administrative support', 'receptionist', 'secretary'],
+    titles: ['administrative assistant', 'admin assistant', 'office assistant', 'administrative support', 'office administrative', 'office admin', 'receptionist', 'secretary'],
     skills: ['ms office', 'word processing', 'spreadsheets', 'filing', 'scheduling', 'receptionist', 'answering phones', 'data entry', 'typing'],
     related: [r('clerk'), r('executive_assistant', 'supervisory'), r('customer_service')] },
   { key: 'clerk', title: 'Clerk / records & legal clerk', sector: 'administrative', collar: 'white',
@@ -169,7 +169,7 @@ export const OCCUPATIONS: Occupation[] = [
 
   // ── Sales & customer service ──
   { key: 'customer_service', title: 'Customer service / retail', sector: 'sales_customer_service', collar: 'service',
-    titles: ['customer service representative', 'retail associate', 'cashier', 'sales associate', 'call center'],
+    titles: ['customer service representative', 'customer service', 'retail associate', 'retail', 'cashier', 'sales associate', 'call center'],
     skills: ['customer service', 'cash handling', 'point of sale', 'customer engagement'],
     related: [r('sales_manager', 'supervisory'), r('admin_assistant')] },
   { key: 'sales_manager', title: 'Sales manager', sector: 'sales_customer_service', collar: 'white', supervisory: true,
