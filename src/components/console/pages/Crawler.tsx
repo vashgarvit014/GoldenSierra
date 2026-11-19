@@ -110,6 +110,7 @@ export function Crawler() {
   const [retrieval, setRetrieval] = useState<RetrievalTest | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [confirmUnindex, setConfirmUnindex] = useState<string | null>(null);
+  const [confirmToggle, setConfirmToggle] = useState<string | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadJobs = useCallback(async () => {
@@ -226,7 +227,18 @@ export function Crawler() {
     }
   }
 
-  async function toggle(source: Source) {
+  /**
+   * Pause / resume. Pausing a source that has searchable content first asks whether to also take that
+   * content out of the knowledge base; resuming a removed source asks whether to put it back.
+   */
+  function askToggle(source: Source) {
+    const pausing = source.status !== 'PAUSED';
+    const needsChoice = pausing ? source.documents.indexed > 0 : source.documents.archived > 0 && source.documents.indexed === 0;
+    if (needsChoice) setConfirmToggle(confirmToggle === source.id ? null : source.id);
+    else void toggle(source);
+  }
+
+  async function toggle(source: Source, knowledge?: 'remove' | 'restore') {
     const next = source.status === 'PAUSED' ? 'ACTIVE' : 'PAUSED';
     setBusy(`toggle:${source.id}`);
     setError(null);
@@ -234,11 +246,14 @@ export function Crawler() {
       const res = await fetch(`/api/admin/sources/${source.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ status: next, ...(knowledge ? { knowledge } : {}) }),
       });
-      if (!res.ok) throw new Error(apiMessage(await res.json(), 'Could not update the source'));
-      notify(next === 'PAUSED' ? 'Source paused' : 'Source resumed');
-      await reloadSources();
+      const json = (await res.json()) as { knowledge?: { message?: string } | null; error?: string };
+      if (!res.ok) throw new Error(apiMessage(json, 'Could not update the source'));
+      const base = next === 'PAUSED' ? 'Source paused' : 'Source resumed';
+      notify(json.knowledge?.message ? `${base}. ${json.knowledge.message}` : base);
+      setConfirmToggle(null);
+      await Promise.all([loadJobs(), reloadSources()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update the source');
     } finally {
@@ -544,7 +559,7 @@ export function Crawler() {
                                     {busy === s.id ? <span className="spin" /> : '▶'} &nbsp; {s.lastCrawledAt ? 'Re-crawl' : 'Crawl'}
                                   </button>
                                 )}
-                                <button className="btn" data-action="toggle" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)} title="Pausing stops crawling. Its content stays searchable until you remove it from the knowledge base.">
+                                <button className="btn" data-action="toggle" disabled={busy === `toggle:${s.id}`} onClick={() => askToggle(s)} title="Pausing stops crawling and asks whether to also remove the source's content from the knowledge base.">
                                   {s.status === 'PAUSED' ? 'Resume' : 'Pause'}
                                 </button>
                                 {s.status === 'PAUSED' && s.documents.indexed > 0 && (
@@ -565,6 +580,35 @@ export function Crawler() {
                               </>
                             )}
                           </div>
+                          {confirmToggle === s.id && s.status !== 'PAUSED' && (
+                            <div className="info-note" style={{ marginTop: 8 }} data-testid="pause-confirm">
+                              <b>Pause “{s.name}”?</b> Pausing stops crawling. Should the chatbot also stop using its {s.documents.indexed} indexed page{s.documents.indexed === 1 ? '' : 's'}?
+                              {runningJob && <div className="fine" style={{ marginTop: 4 }}>A crawl is running — cancel it first to remove the content.</div>}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                <button className="btn primary" data-action="pause-remove" disabled={busy === `toggle:${s.id}` || Boolean(runningJob)} onClick={() => void toggle(s, 'remove')}>
+                                  {busy === `toggle:${s.id}` ? <span className="spin" /> : null} Pause &amp; remove from knowledge base
+                                </button>
+                                <button className="btn" data-action="pause-keep" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)}>
+                                  Pause, keep it searchable
+                                </button>
+                                <button className="btn" onClick={() => setConfirmToggle(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                          {confirmToggle === s.id && s.status === 'PAUSED' && (
+                            <div className="info-note" style={{ marginTop: 8 }} data-testid="resume-confirm">
+                              <b>Resume “{s.name}”?</b> Its {s.documents.archived} page{s.documents.archived === 1 ? ' was' : 's were'} removed from the knowledge base. Put {s.documents.archived === 1 ? 'it' : 'them'} back now (re-indexed from the saved text, no re-crawl)?
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                <button className="btn primary" data-action="resume-restore" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s, 'restore')}>
+                                  {busy === `toggle:${s.id}` ? <span className="spin" /> : null} Resume &amp; restore to knowledge base
+                                </button>
+                                <button className="btn" data-action="resume-only" disabled={busy === `toggle:${s.id}`} onClick={() => void toggle(s)}>
+                                  Resume only
+                                </button>
+                                <button className="btn" onClick={() => setConfirmToggle(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
                           {confirmUnindex === s.id && (
                             <div className="info-note" style={{ marginTop: 8 }} data-testid="unindex-confirm">
                               <b>Take “{s.name}” out of the knowledge base?</b> The chatbot will stop using its {s.documents.indexed} page{s.documents.indexed === 1 ? '' : 's'}. The source and the saved pages are kept, so you can restore it later without re-crawling.

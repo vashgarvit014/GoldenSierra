@@ -17,6 +17,8 @@ export const dynamic = 'force-dynamic';
 const UpdateSchema = z.object({
   name: z.string().min(2).max(120).optional(),
   status: z.enum(['ACTIVE', 'PAUSED', 'FAILED']).optional(),
+  /** With status PAUSED: also take the content out of search. With ACTIVE: put removed content back. */
+  knowledge: z.enum(['remove', 'restore']).optional(),
   includePatterns: z.array(z.string().max(300)).max(20).optional(),
   excludePatterns: z.array(z.string().max(300)).max(20).optional(),
   maxDepth: z.number().int().min(0).max(6).optional(),
@@ -104,10 +106,20 @@ export const PATCH = withErrorHandling(
     const existing = await prisma.knowledgeSource.findUnique({ where: { id } });
     if (!existing) throw notFound('Source not found');
 
-    const source = await prisma.knowledgeSource.update({ where: { id }, data: body });
-    await recordAudit(session.userId, 'update', 'KnowledgeSource', id, body);
+    const { knowledge, ...fields } = body;
+    // Pausing can take the content out of the knowledge base in the same step; resuming can put it back.
+    if (knowledge === 'remove' && fields.status !== 'PAUSED') throw badRequest('Content is removed from the knowledge base only when pausing.');
+    if (knowledge) await assertNoActiveJob(id);
 
-    return NextResponse.json({ source });
+    const source = await prisma.knowledgeSource.update({ where: { id }, data: fields });
+    await recordAudit(session.userId, 'update', 'KnowledgeSource', id, fields);
+
+    const kb = knowledge === 'remove'
+      ? await removeFromKnowledgeBase(id, session.userId)
+      : knowledge === 'restore'
+        ? await restoreToKnowledgeBase(id, session.userId)
+        : null;
+    return NextResponse.json({ source, knowledge: kb });
   },
 );
 
@@ -161,12 +173,44 @@ export const DELETE = withErrorHandling(
 
 const KnowledgeAction = z.object({ action: z.enum(['remove_from_kb', 'restore_to_kb']) });
 
+/** Takes a source's content out of search, recording exactly which documents were taken out. */
+async function removeFromKnowledgeBase(sourceId: string, actorId: string) {
+  const live = await prisma.document.findMany({ where: { sourceId, status: { not: DocumentStatus.ARCHIVED } }, select: { id: true } });
+  const removed = await archiveSourceDocuments(sourceId);
+  // A restore puts back these documents and nothing else (not pages archived earlier because they
+  // disappeared from the website).
+  await prisma.auditLog.create({
+    data: { actorId, action: 'remove_from_kb', entity: 'KnowledgeSource', entityId: sourceId, metadata: { documentIds: live.map((d) => d.id), archivedDocuments: removed } },
+  });
+  return { removedDocuments: removed, message: `${removed} document${removed === 1 ? '' : 's'} taken out of the knowledge base. The chatbot no longer uses this source; restore it any time.` };
+}
+
+/** Re-indexes the documents the last removal took out, from their stored text (no re-crawl). */
+async function restoreToKnowledgeBase(sourceId: string, actorId: string) {
+  const last = await prisma.auditLog.findFirst({ where: { action: 'remove_from_kb', entity: 'KnowledgeSource', entityId: sourceId }, orderBy: { createdAt: 'desc' } });
+  const ids = ((last?.metadata as { documentIds?: string[] } | null)?.documentIds ?? []).filter((x) => typeof x === 'string');
+  const archived = ids.length
+    ? await prisma.document.findMany({ where: { id: { in: ids }, sourceId, status: DocumentStatus.ARCHIVED }, select: { id: true } })
+    : [];
+  if (!archived.length) return null;
+  await prisma.document.updateMany({ where: { id: { in: archived.map((d) => d.id) } }, data: { status: DocumentStatus.EXTRACTED } });
+  const jobId = await createJob(JobType.REINDEX, sourceId, { documentIds: archived.map((d) => d.id) });
+  const { mode } = await enqueueJob(jobId);
+  await recordAudit(actorId, 'restore_to_kb', 'KnowledgeSource', sourceId, { documents: archived.length, jobId, mode });
+  return { jobId, mode, restoringDocuments: archived.length, message: `Restoring ${archived.length} document${archived.length === 1 ? '' : 's'} to the knowledge base — progress is shown in the pipeline.` };
+}
+
+async function assertNoActiveJob(sourceId: string) {
+  const active = await prisma.ingestionJob.findFirst({ where: { sourceId, status: { in: ['QUEUED', 'RUNNING'] } } });
+  if (active) throw badRequest(`A job is ${active.status.toLowerCase()} for this source. Wait for it or cancel it first.`);
+}
+
 /**
  * POST /api/admin/sources/[id]  { action }
  *
  *   remove_from_kb — a PAUSED source's content is taken out of search (vectors and chunks deleted,
  *                    document rows kept as ARCHIVED with their text). The source itself stays.
- *   restore_to_kb  — the archived documents are re-indexed from their stored text (no re-crawl).
+ *   restore_to_kb  — the removed documents are re-indexed from their stored text (no re-crawl).
  */
 export const POST = withErrorHandling(
   async (request: Request, context: { params: Promise<{ id: string }> }) => {
@@ -176,31 +220,14 @@ export const POST = withErrorHandling(
 
     const source = await prisma.knowledgeSource.findUnique({ where: { id } });
     if (!source) throw notFound('Source not found');
-    const active = await prisma.ingestionJob.findFirst({ where: { sourceId: id, status: { in: ['QUEUED', 'RUNNING'] } } });
-    if (active) throw badRequest(`A job is ${active.status.toLowerCase()} for this source. Wait for it or cancel it first.`);
+    await assertNoActiveJob(id);
 
     if (action === 'remove_from_kb') {
       if (source.status !== 'PAUSED') throw badRequest('Pause the source first: its content can only be taken out of the knowledge base while it is paused.');
-      const live = await prisma.document.findMany({ where: { sourceId: id, status: { not: DocumentStatus.ARCHIVED } }, select: { id: true } });
-      const removed = await archiveSourceDocuments(id);
-      // The exact documents taken out are recorded, so a restore puts back these and nothing else
-      // (not pages that were archived earlier because they disappeared from the website).
-      await prisma.auditLog.create({
-        data: { actorId: session.userId, action: 'remove_from_kb', entity: 'KnowledgeSource', entityId: id, metadata: { documentIds: live.map((d) => d.id), archivedDocuments: removed } },
-      });
-      return NextResponse.json({ removedDocuments: removed, message: `${removed} document${removed === 1 ? '' : 's'} taken out of the knowledge base. The chatbot no longer uses this source; restore it any time.` });
+      return NextResponse.json(await removeFromKnowledgeBase(id, session.userId));
     }
-
-    const last = await prisma.auditLog.findFirst({ where: { action: 'remove_from_kb', entity: 'KnowledgeSource', entityId: id }, orderBy: { createdAt: 'desc' } });
-    const ids = ((last?.metadata as { documentIds?: string[] } | null)?.documentIds ?? []).filter((x) => typeof x === 'string');
-    const archived = ids.length
-      ? await prisma.document.findMany({ where: { id: { in: ids }, sourceId: id, status: DocumentStatus.ARCHIVED }, select: { id: true } })
-      : [];
-    if (!archived.length) throw badRequest('Nothing to restore: this source was not removed from the knowledge base, or it has already been restored. Re-crawl it to fetch its pages again.');
-    await prisma.document.updateMany({ where: { id: { in: archived.map((d) => d.id) } }, data: { status: DocumentStatus.EXTRACTED } });
-    const jobId = await createJob(JobType.REINDEX, id, { documentIds: archived.map((d) => d.id) });
-    const { mode } = await enqueueJob(jobId);
-    await recordAudit(session.userId, 'restore_to_kb', 'KnowledgeSource', id, { documents: archived.length, jobId, mode });
-    return NextResponse.json({ jobId, mode, restoringDocuments: archived.length, message: `Restoring ${archived.length} document${archived.length === 1 ? '' : 's'} to the knowledge base — progress is shown in the pipeline.` }, { status: 202 });
+    const restored = await restoreToKnowledgeBase(id, session.userId);
+    if (!restored) throw badRequest('Nothing to restore: this source was not removed from the knowledge base, or it has already been restored. Re-crawl it to fetch its pages again.');
+    return NextResponse.json(restored, { status: 202 });
   },
 );
