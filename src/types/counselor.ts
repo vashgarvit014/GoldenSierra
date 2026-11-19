@@ -91,6 +91,8 @@ export type CounselorContext = {
   pronoun?: 'she' | 'he';
   /** They said they are looking for a job ("I need a job", "looking for warehouse work"): the job-or-training question is settled. */
   jobGoalStated?: boolean;
+  /** Their previous work as they described it ('none' when they have no work history yet). */
+  workHistory?: string;
 };
 
 export type QualFact = {

@@ -103,9 +103,13 @@ const FILLER_SENTENCE = [
   /^(i'?ve|i have) (noted|recorded|updated (her|his|their|your) profile)/i,
   /^(i'?ll|i will|next,? i'?ll|now i'?ll|let me)\b/i,
   /^(that'?s|it'?s|this is) (a )?(solid|great|wonderful|meaningful|good|clear|strong|smart)\b/i,
+  /\b(completely|totally|perfectly) (normal|natural|understandable)\b/i,
   /^(it'?s )?(completely )?normal to feel/i,
   /\b(you'?ve|they'?ve) got this\b/i,
 ];
+
+/** Specific credentials: a lead may only name one the user did. */
+const CREDENTIAL = /\b(associate|bachelor'?s?|master'?s?|doctorate|phd|ged|diploma|license|licence|certificat\w*|cna|lvn)\b/gi;
 
 /** Praise and pep talk: dropped wherever they appear in a sentence. */
 const PRAISE = /\b(solid|great|wonderful|meaningful|compassionate|excellent|fantastic|amazing|perfect|good place|impressive|exciting|rewarding|nicely)\b/i;
@@ -118,7 +122,7 @@ const STOCK_PREFIX = /^(got it|understood|okay|ok|alright|sure|so|right|noted)\s
 const UNSOURCED_CLAIM = /\b(in[- ]demand|steady demand|high demand|growing field|momentum|widely available|lots? of (jobs|openings|employers)|many employers|good pay|pays well|around (roseville|rocklin|auburn)|tech-adjacent|hurdle|settles?|clears? the|meets? the|qualif\w*|eligib\w*)\b/i;
 
 /** Sentence-level clean-up applied to every drafted lead-in. */
-export function polishLead(text: string, opts: { previous?: string[]; maxWords?: number } = {}): string {
+export function polishLead(text: string, opts: { previous?: string[]; maxWords?: number; maxSentences?: number; greeting?: boolean; userText?: string } = {}): string {
   const maxWords = opts.maxWords ?? 24;
   const sentences = text
     .replace(/\s+/g, ' ')
@@ -129,20 +133,24 @@ export function polishLead(text: string, opts: { previous?: string[]; maxWords?:
     .filter(Boolean)
     .filter((s) => !FILLER_SENTENCE.some((re) => re.test(s)))
     .filter((s) => !PRAISE.test(s) && !PROMISE.test(s))
-    .filter((s) => !UNSOURCED_CLAIM.test(s));
-  const first = sentences[0] ?? '';
-  if (!first || first.split(' ').length > maxWords) return '';
+    .filter((s) => !UNSOURCED_CLAIM.test(s))
+    // Real words only ("..." is not a sentence), and no credential the user never mentioned.
+    .filter((s) => (s.match(/[a-z]{2,}/gi) ?? []).length >= 3)
+    .filter((s) => !(s.match(CREDENTIAL) ?? []).some((c) => opts.userText !== undefined && !opts.userText.toLowerCase().includes(c.toLowerCase())));
+  const kept = sentences.filter((x) => x.split(' ').length <= maxWords).slice(0, opts.maxSentences ?? 1);
+  const first = kept[0] ?? '';
+  if (!first) return '';
   // Never open two turns the same way.
-  const opening = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '').split(' ').slice(0, 2).join(' ');
+  const opening = (x: string) => x.toLowerCase().replace(/[^a-z ]/g, '').split(' ').slice(0, 2).join(' ');
   if (opts.previous?.some((p) => opening(p) === opening(first))) return '';
-  return /[.!]$/.test(first) ? first : `${first}.`;
+  return kept.map((x) => (/[.!]$/.test(x) ? x : `${x}.`)).join(' ');
 }
 
 const LEAD_SYSTEM = `You write the first sentence of a workforce counselor's reply. The counselor's question follows your sentence automatically — do not ask it.
 
 Return JSON only: {"lead": "..."}
 
-The lead is ONE short, natural sentence (6–18 words), or "" when there is nothing worth saying.
+The lead is ONE short, natural sentence (6–18 words) — two only on the first reply —, or "" when there is nothing worth saying.
 - React to what is NEW in the user's message, specifically and warmly, the way an experienced counselor talks.
 - If they corrected something, say briefly that you've updated it.
 - If they are unsure where to start, reassure them in a few words that you can help them find a starting point.
@@ -153,7 +161,14 @@ The lead is ONE short, natural sentence (6–18 words), or "" when there is noth
 - Never claim anything they did not say (e.g. experience they only want to get).
 
 Good leads: "Caregiving it is — that gives us a clear focus." / "Being behind on rent makes the timing important." / "Five years at a register means a lot of customer-facing experience." / "Without a car, where a job is matters as much as what it is."
+- FIRST REPLY of the conversation (marked below): write TWO short sentences — a brief warm greeting ("Hi, I'm really glad you reached out.") and one sentence of genuine empathy for their situation ("Looking for work while bills pile up is stressful, and you don't have to sort it out alone."). Never on later replies.
 - HELPER mode: the user is asking about someone else — refer to that person as "they" (or "she"/"he" if the user did), never "you".`;
+
+/** Used when the model's first-reply greeting is unusable: the conversation still opens warmly. */
+const FIRST_FALLBACK = {
+  self: "Hi, I'm glad you reached out. Let's work through this together.",
+  helper: "Hi, I'm glad you reached out on their behalf. Let's work through this together.",
+} as const;
 
 const LeadSchema = z.object({ lead: z.string().max(300).optional().default('') });
 
@@ -171,8 +186,9 @@ export async function leadIn(args: {
   why?: string;
 }): Promise<string> {
   const previous = args.history.filter((h) => h.role === 'assistant').slice(-3).map((h) => h.content);
+  const first = previous.length === 0;
   const fallback = args.corrections.length ? "Thanks, I've updated that." : '';
-  if (!hasLlm()) return fallback;
+  if (!hasLlm()) return first ? FIRST_FALLBACK[args.ctx.mode === 'helper' ? 'helper' : 'self'] : fallback;
   try {
     const response = await withTimeout(
       getLlmClient().chat.completions.create({
@@ -186,6 +202,7 @@ export async function leadIn(args: {
             role: 'user',
             content: [
               `Mode: ${args.ctx.mode === 'helper' ? 'HELPER' : 'SELF'}`,
+              first ? 'This is the FIRST REPLY of the conversation: greet, then empathise.' : '',
               previous.length ? `Previous reply opened: "${previous.at(-1)!.slice(0, 120)}"` : '',
               `New facts this turn: ${JSON.stringify(args.newFacts)}`,
               args.corrections.length ? `Corrected: ${args.corrections.join(', ')}` : '',
@@ -202,8 +219,8 @@ export async function leadIn(args: {
       const r = LeadSchema.safeParse(v);
       return r.success ? ({ success: true, data: r.data } as const) : ({ success: false, issues: r.error.issues.map((i) => i.message) } as const);
     }, 'Lead-in');
-    const polished = polishLead(stripUncitedFacts(data?.lead ?? '', args.message), { previous });
-    return polished || fallback;
+    const polished = polishLead(stripUncitedFacts(data?.lead ?? '', args.message), { previous, maxSentences: first ? 2 : 1, userText: args.message });
+    return polished || (first ? FIRST_FALLBACK[args.ctx.mode === 'helper' ? 'helper' : 'self'] : fallback);
   } catch (err) {
     logger.warn('Lead-in unavailable; asking the question directly', { error: err instanceof Error ? err.message : String(err) });
     return fallback;

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { hasLlm } from '../env';
@@ -98,12 +99,18 @@ async function extractFields(segment: string) {
 export type ExtractReport = { document: string; listings: number; skipped: { ordinal: number; reason: string }[]; droppedFields: number };
 
 /** Rebuilds JobListing rows from every listing table in the index. Source documents are not touched. */
-export async function extractJobListings({ dryRun = false } = {}): Promise<ExtractReport[]> {
+export async function extractJobListings({ dryRun = false, documentIds }: { dryRun?: boolean; documentIds?: string[] } = {}): Promise<ExtractReport[]> {
   if (!hasLlm()) throw new Error('Job extraction needs the configured LLM');
-  const docs = await prisma.document.findMany({ where: { status: 'INDEXED', accessLevel: 'PUBLIC' }, select: { id: true, title: true, url: true, content: true } });
+  const docs = await prisma.document.findMany({
+    where: { status: 'INDEXED', accessLevel: 'PUBLIC', ...(documentIds ? { id: { in: documentIds } } : {}) },
+    select: { id: true, title: true, url: true, content: true },
+  });
   const reports: ExtractReport[] = [];
   for (const d of docs) {
-    if (!HEADER.test(d.content.slice(0, 1500))) continue;
+    if (!HEADER.test(d.content.slice(0, 1500))) {
+      if (isJobBoardPage(d.url, d.content)) reports.push(await extractWebPostings(d, dryRun));
+      continue;
+    }
     if (SYNTHETIC.test(d.content.slice(0, 2000))) {
       logger.warn('Skipping a self-declared synthetic listing document', { document: d.title });
       continue;
@@ -171,4 +178,128 @@ export async function extractJobListings({ dryRun = false } = {}): Promise<Extra
     reports.push(report);
   }
   return reports;
+}
+
+
+// ───────────────────────── crawled job-board pages ─────────────────────────
+
+/** A crawled page whose address says it lists vacancies (/jobs, /careers, /job-openings…), not an event or workshop. */
+export function isJobBoardPage(url: string | null, content: string): boolean {
+  if (!url || /\.pdf(\?|$)/i.test(url)) return false;
+  let path = '';
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (/\/(event|events|news|blog|calendar|workshops?)\//.test(path)) return false;
+  return /\/(jobs?|careers?|job-openings|openings|employment|job-board|job-postings|positions|vacancies)(\/|$)/.test(path) && content.length >= 150;
+}
+
+const Postings = z.object({
+  postings: z.array(z.object({
+    title: z.string().nullish(),
+    employer: z.string().nullish(),
+    location: z.string().nullish(),
+    category: z.string().nullish(),
+    summary: z.string().nullish(),
+    qualifications: z.string().nullish(),
+    salary: z.string().nullish(),
+    employmentType: z.string().nullish(),
+    deadline: z.string().nullish(),
+    contact: z.string().nullish(),
+  })).max(60),
+});
+
+const BOARD_SYSTEM = `You copy job postings out of the text of ONE job-board web page. Return JSON only:
+{"postings": [{"title", "employer", "location", "category", "summary", "qualifications", "salary", "employmentType", "deadline", "contact"}]}
+Rules:
+- Only real job vacancies someone could apply for. Not events, workshops, job fairs, menus, navigation or sign-up forms.
+- COPY every value exactly as it appears on the page. Never reword, summarize, translate or correct.
+- title: the job title only (e.g. "Director of Finance"), never the employer.
+- employer: the hiring organisation exactly as printed, or null.
+- summary: the first sentence of the posting's description, exactly, or null.
+- Use null for anything the page does not state. If the page lists no vacancies, return {"postings": []}.`;
+
+/** One posting's own text on the page: from its title (or the employer just before it) to the next posting. */
+function postingSegments(content: string, titles: { title: string; employer: string | null }[]): (string | null)[] {
+  const lower = content.toLowerCase();
+  let from = 0;
+  const starts = titles.map(({ title, employer }) => {
+    const at = lower.indexOf(title.toLowerCase(), from);
+    if (at < 0) return -1;
+    let start = at;
+    if (employer) {
+      const e = lower.lastIndexOf(employer.toLowerCase(), at);
+      if (e >= from && at - e < 400) start = e;
+    }
+    from = at + title.length;
+    return start;
+  });
+  return starts.map((start, i) => {
+    if (start < 0) return null;
+    const next = starts.slice(i + 1).find((x) => x > start) ?? Math.min(content.length, start + 2500);
+    return content.slice(start, next).trim();
+  });
+}
+
+async function extractWebPostings(d: { id: string; title: string; url: string | null; content: string }, dryRun: boolean): Promise<ExtractReport> {
+  const report: ExtractReport = { document: d.url ?? d.title, listings: 0, skipped: [], droppedFields: 0 };
+  let found: z.infer<typeof Postings>['postings'] | null = null;
+  for (let attempt = 0; attempt < 2 && !found; attempt++) {
+    const done = await completeAnswer(
+      [
+        { role: 'system', content: BOARD_SYSTEM },
+        { role: 'user', content: d.content.slice(0, 14000) },
+      ],
+      { label: 'job board extraction', maxTokens: 3000 },
+    );
+    const parsed = Postings.safeParse(extractJsonObject(done.text));
+    if (parsed.success) found = parsed.data.postings;
+  }
+  if (!found) {
+    report.skipped.push({ ordinal: 0, reason: 'extraction returned nothing usable' });
+    return report;
+  }
+  // The title must be on the page; everything else must be inside that posting's own text.
+  const titled = found
+    .map((p) => ({ p, title: verbatim(p.title, d.content), employer: verbatim(p.employer, d.content) }))
+    .filter((x): x is typeof x & { title: string } => {
+      if (!x.title) report.skipped.push({ ordinal: 0, reason: `title not found verbatim: ${String(x.p.title).slice(0, 60)}` });
+      return Boolean(x.title);
+    });
+  const segments = postingSegments(d.content, titled.map((x) => ({ title: x.title, employer: x.employer })));
+  const rows: Prisma.JobListingCreateManyInput[] = [];
+  titled.forEach((x, i) => {
+    const seg = segments[i];
+    if (!seg) return;
+    const keep = (v: string | null | undefined) => {
+      const kept = verbatim(v, seg);
+      if (v && !kept && !/^(not specified|not available)/i.test(v)) report.droppedFields++;
+      return kept;
+    };
+    const summary = keep(x.p.summary) ?? keep(x.p.category);
+    const qualifications = keep(x.p.qualifications);
+    const occupations = classifyListing(x.title, `${qualifications ?? ''} ${summary ?? ''} ${x.p.category ?? ''}`);
+    const county = /\b(Placer|El Dorado|Alpine|Sacramento|Nevada|Yolo) County\b/.exec(seg)?.[0] ?? null;
+    rows.push({
+      documentId: d.id, ordinal: rows.length + 1, title: x.title,
+      employer: keep(x.p.employer), county, location: keep(x.p.location), requiredSkills: null,
+      qualifications, salary: keep(x.p.salary), employmentType: keep(x.p.employmentType),
+      datePosted: null, deadline: keep(x.p.deadline), summary,
+      // The page itself is the posting's source (document.url); no link is stored that the posting text lacks.
+      sourceUrl: null, applyUrl: null, contact: keep(x.p.contact),
+      occupations, sector: occupations[0] ? OCCUPATION_BY_KEY.get(occupations[0])!.sector : null,
+      segment: seg, segmentHash: createHash('sha256').update(seg).digest('hex'),
+    });
+  });
+  report.listings = rows.length;
+  if (!dryRun) {
+    await prisma.$transaction([
+      prisma.jobListing.deleteMany({ where: { documentId: d.id } }),
+      prisma.jobListing.createMany({ data: rows }),
+    ]);
+  }
+  logger.info('Job board extracted', { page: d.url, postings: rows.length, skipped: report.skipped.length, droppedFields: report.droppedFields });
+  return report;
 }

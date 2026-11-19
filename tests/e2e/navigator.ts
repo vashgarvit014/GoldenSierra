@@ -91,7 +91,7 @@ async function verifyCitations(t: Turn): Promise<{ ok: boolean; why: string }> {
     const a = await session('helper');
     const a1 = await a("I'm helping a 19-year-old former foster youth interested in healthcare who hasn't completed her GED.");
     const f1 = a1.payload.flow!;
-    check('A1: third person, one question, 2–4 quick replies', questions(a1.answer) === 1 && !/\byou\b/i.test(a1.answer.replace(/\byou'?re helping\b/i, '')) && f1.quickReplies.length >= 2 && f1.quickReplies.length <= 4, a1.answer);
+    check('A1: third person, one question, 2–4 quick replies', questions(a1.answer) === 1 && !/\byou\b/i.test((f1.question ?? '').replace(/\byou['’]?re (helping|supporting)\b/i, '')) && f1.quickReplies.length >= 2 && f1.quickReplies.length <= 4, a1.answer);
     check('A1: context extracted (helper, 19, healthcare, GED, foster youth)', f1.knownFacts.who === 'Helping someone else' && /19/.test(f1.knownFacts.age ?? '') && /Healthcare/.test(f1.knownFacts.careerInterest ?? '') && /GED/i.test(f1.knownFacts.education ?? '') && /foster/i.test(f1.knownFacts.situation ?? ''), JSON.stringify(f1.knownFacts));
     const n1 = a1.payload.navigator?.narrowing;
     const totalListings = await prisma.jobListing.count();

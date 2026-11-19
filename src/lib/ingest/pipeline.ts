@@ -1,8 +1,9 @@
+import { extractJobListings } from '../jobs/extract';
 import { randomUUID } from 'node:crypto';
 import { DocumentStatus, DocumentType, JobStatus, JobType, type Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logger } from '../logger';
-import { env } from '../env';
+import { env, hasLlm } from '../env';
 import { embedTexts } from '../ai/embeddings';
 import {
   deleteByDocument,
@@ -617,6 +618,20 @@ export async function runCrawlJob(jobId: string): Promise<void> {
       await tracker.flush();
     }
 
+    // Job boards and listing tables in this source become structured job listings (every field verbatim
+    // from the page), so job matching sees postings from every crawled site, not only uploaded tables.
+    if (!(await wasCancelled(jobId)) && hasLlm()) {
+      try {
+        const docs = await prisma.document.findMany({ where: { sourceId: source.id, status: DocumentStatus.INDEXED }, select: { id: true } });
+        const reports = await extractJobListings({ documentIds: docs.map((d) => d.id) });
+        const postings = reports.reduce((n, r) => n + r.listings, 0);
+        if (reports.length) tracker.log('info', `Job postings extracted: ${postings} from ${reports.length} job page${reports.length === 1 ? '' : 's'}.`);
+      } catch (err) {
+        tracker.log('warn', `Job posting extraction skipped: ${describeError(err, 300)}`);
+      }
+      await tracker.flush();
+    }
+
     const cancelled = await wasCancelled(jobId);
     const indexedNow = indexQueue.length - tally.indexFailures;
     const searchable = indexedNow + tally.unchanged + tally.pdfOk;
@@ -630,6 +645,9 @@ export async function runCrawlJob(jobId: string): Promise<void> {
     } else if (summary.robotsBlocked) {
       status = JobStatus.FAILED;
       note = "robots.txt disallows crawling this site, so nothing was fetched. The crawler honours robots.txt and cannot override it.";
+    } else if (searchable === 0 && summary.accessBlocked) {
+      status = JobStatus.FAILED;
+      note = `This site blocks automated access: every page returned "${summary.errors[0]?.reason ?? 'HTTP 403'}" (bot protection such as Cloudflare). The crawler respects that and stopped after ${summary.visited} pages. To include this site, ask its owner to allow the crawler, or upload the content (for example a PDF or exported list) as a document.`;
     } else if (searchable === 0) {
       // Saved is not ingested: with no searchable documents this must not read as success.
       status = JobStatus.FAILED;

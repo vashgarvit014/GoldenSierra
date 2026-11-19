@@ -496,6 +496,9 @@ export function figureSupported(claim: Figure, sentence: string, evidence: Figur
 }
 
 /** Splits on sentence ends, keeping a citation marker that follows the full stop ("... hour. [1]") with its own sentence. */
+/** A small count directly before a plural noun: "three positions", "4 jobs". */
+const COUNT_BEFORE_PLURAL = /\b(lists?|has|have|includes?|shows?|posts?|offers?|are|with)\s+(?:two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\s+(?=[a-z-]+s\b)/gi;
+
 /** Sentence openers that refer back to the previous sentence. */
 const ANAPHORIC_START = /^(all|both|each|they|these|those|it|this|that|its|their|such|the latter|the former|also|additionally|in addition)\b/i;
 /** CJK, Cyrillic, Arabic, Hebrew, Thai… — anything an English answer should not contain. */
@@ -612,7 +615,7 @@ export function verifyAnswer(raw: string, used: RetrievedSource[], context: { qu
     for (const unit of units) {
       sentenceIndex++;
       const { cited } = unit;
-      const clean = unit.sentence;
+      let clean = unit.sentence;
       // "All are located at…" / "They pay…" only make sense after the sentence they refer back to.
       // When that sentence was removed as unsupported, its follow-on goes too rather than dangle.
       if (previousRemoved && ANAPHORIC_START.test(clean)) {
@@ -634,6 +637,12 @@ export function verifyAnswer(raw: string, used: RetrievedSource[], context: { qu
         if (fresh.length === 0 && !/https?:\/\/|@/.test(clean)) kept.push({ text: clean, chunkIdx: [] });
         else unsupported.push(clean);
         continue;
+      }
+      // A count the model made up ("lists three positions") is removed when it is the only unsupported
+      // figure; the rest of the sentence is then checked as usual. This only ever removes a claim.
+      if (!clean.endsWith(':') && !figuresIn(clean).every((f) => figureSupported(f, clean, evidenceFigures))) {
+        const uncounted = clean.replace(COUNT_BEFORE_PLURAL, '$1 ').replace(/\s{2,}/g, ' ');
+        if (uncounted !== clean && figuresIn(uncounted).every((f) => figureSupported(f, uncounted, evidenceFigures))) clean = uncounted;
       }
       const terms = contentTerms(clean);
       const figs = figuresIn(clean);

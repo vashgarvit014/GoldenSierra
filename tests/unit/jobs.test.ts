@@ -111,7 +111,7 @@ describe('role extraction and questions', () => {
 describe('results message with job counts', () => {
   it('states real counts, keeps the no-answer sentence for services, and never claims eligibility', () => {
     const m = composeResults({ ctx: ctx(), focuses: [{ key: 'career', label: 'solar training', query: 'q' }], verified: 'x', answered: false, corrections: [], uncertainties: [], refine: null, jobs: { best: 0, related: 2, closed: 1, total: 12 } });
-    expect(m).toContain('I also checked the 12 indexed job listings against your role and the published requirements: none is the exact role you described with no requirement gap, 2 are related roles (1 more matched, but their deadlines have passed).');
+    expect(m).toContain('I checked the 12 indexed job listings against your role and the published requirements: none is the exact role you described with no requirement gap, 2 are related roles (1 more matched, but their deadlines have passed).');
     expect(m).toContain("I couldn't find enough information about that in the currently indexed knowledge base.");
     expect(m).toMatch(/employer to decide/);
   });

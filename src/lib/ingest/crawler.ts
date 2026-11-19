@@ -54,6 +54,8 @@ export type CrawlSummary = {
   budgetExhausted: BudgetReason | null;
   /** The whole site is excluded by robots.txt. */
   robotsBlocked: boolean;
+  /** Every page so far was refused (401/403/429): the site blocks automated access, so the crawl stopped early. */
+  accessBlocked?: boolean;
   errors: { url: string; reason: string }[];
 };
 
@@ -357,7 +359,14 @@ export async function crawl(target: CrawlTarget, events: CrawlEvents = {}, testi
   seen.add(rootNormalized);
   events.onDiscovered?.(frontier.length);
 
+  // A site behind bot protection refuses every request. Stop after a handful of refusals with no
+  // success instead of spending the whole page budget on 403s — and say why.
+  const BLOCKED_AFTER = 8;
+  let refused = 0;
+  const blocked = () => summary.succeeded === 0 && refused >= BLOCKED_AFTER;
+
   for (let depth = 0; depth <= target.maxDepth && frontier.length > 0; depth++) {
+    if (blocked()) break;
     if (summary.visited >= pageCap) {
       summary.budgetExhausted ??= frontier.length ? 'pages' : null;
       break;
@@ -380,7 +389,7 @@ export async function crawl(target: CrawlTarget, events: CrawlEvents = {}, testi
     await Promise.all(
       batch.map((item) =>
         limit(async () => {
-          if (summary.visited >= pageCap) return;
+          if (summary.visited >= pageCap || blocked()) return;
           if (await events.shouldStop?.()) return;
           const spentNow = budgetLeft();
           if (spentNow) {
@@ -443,8 +452,13 @@ export async function crawl(target: CrawlTarget, events: CrawlEvents = {}, testi
 
             // 401/403 mean the page is gated. That is a boundary to respect,
             // not an obstacle to work around.
-            if (status === 401 || status === 403) {
+            if (status === 401 || status === 403 || status === 429) {
+              refused++;
               log.info('Skipping access-restricted page', { url: item.url, status });
+              if (blocked() && !summary.accessBlocked) {
+                summary.accessBlocked = true;
+                log.warn('Every page is refused; the site blocks automated access. Stopping the crawl.', { refused });
+              }
             }
 
             summary.errors.push({ url: item.url, reason });

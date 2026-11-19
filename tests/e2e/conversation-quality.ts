@@ -46,6 +46,9 @@ export const SCENARIOS: Scenario[] = [
   { id: 18, name: 'Unsupported question', mode: 'self', steps: ['Can you help me file my taxes?'] },
   { id: 19, name: 'Missing qualifications', mode: 'self', steps: ['I want to be an electrician. I have 1 year of experience and no license.'] },
   { id: 20, name: 'Related-role matching', mode: 'helper', steps: ['She worked as a cashier for 4 years and wants an office job.'] },
+  { id: 21, name: 'Full flow: greeting → background → requirements → jobs', mode: 'self', steps: ["Hi, I lost my job last month and I'm feeling really stressed.", 'I worked as a cashier for 3 years.', 'I finished high school.', "I'd like an office job, maybe a clerk.", { results: true }] },
+  { id: 22, name: 'Full flow (helper): background → finance role → jobs from a crawled board', mode: 'helper', steps: ["I'm helping my daughter find work.", 'She worked as a bookkeeper for 6 years.', 'She has a college degree.', 'Something in finance, like a finance director.', { results: true }] },
+  { id: 23, name: 'Crawled job board lookup', mode: 'self', steps: ['What jobs are posted on the El Dorado County Chamber job board?'] },
 ];
 
 type Turn = { user: string; bot: string; quickReplies: string[]; citations: number; kind: string };

@@ -149,13 +149,18 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
   const interest =
     /\b(?:interested in|wants? to (?:work|go) in|career in|looking at|aiming for|get into|pathway (?:in|to))\s+([a-z][a-z\s&/-]{2,34})/i.exec(text);
   const occupation = /\b(?:become|be|work as|training to be)\s+an?\s+([a-z][a-z\s-]{2,30})/i.exec(text);
-  if (/\bstill deciding\b|\bundecided\b|\b(?:not sure|no idea|doesn'?t know|don'?t know|unsure)\s+what (?:kind of )?(?:work|job|career)/i.test(text)) out.careerInterest = 'still deciding';
+  // "I worked as a bookkeeper for 6 years" describes past work, not the kind of work they want next.
+  const pastOnly = /\b(worked|used to|years (?:as|in|of)|was an?|previously|former)\b/i.test(text) && !/\b(want|wants|interested|looking for|like to|'d like|hoping|aiming|get into|something in|maybe|prefer)\b/i.test(text);
+  if (pastOnly) {
+    // nothing: the roles named are experience (below)
+  } else   if (/\bstill deciding\b|\bundecided\b|\b(?:not sure|no idea|doesn'?t know|don'?t know|unsure)\s+what (?:kind of )?(?:work|job|career)/i.test(text)) out.careerInterest = 'still deciding';
   else if (interest?.[1]) {
     // Stop at a clause boundary — "healthcare but hasn't finished her GED"
     // must not become a career interest of "healthcare but hasn".
     out.careerInterest = cleanInterest(interest[1]);
   } else if (/\bhealthcare|nursing|\bnurse|medical|\bcna\b|caregiv|phlebotom|pharmacy tech|dental assist/i.test(text)) out.careerInterest = 'healthcare';
   else if (/\btrades?\b|construction|welding|welder|electrician|electric|plumb|carpent|hvac|mechanic|forklift/i.test(text)) out.careerInterest = 'the trades';
+  else if (/\bfinanc|accountant|accounting|controller|treasurer\b/i.test(text)) out.careerInterest = 'finance and accounting';
   else if (/\boffice|admin|clerical|bookkeep|receptionist/i.test(text)) out.careerInterest = 'office work';
   else if (/\bit\b|tech|software|cyber|comput/i.test(text)) out.careerInterest = 'technology';
   else if (occupation?.[1]) out.careerInterest = cleanInterest(occupation[1]);
@@ -167,20 +172,24 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
 
   if (/\b(?:need|needs|looking for|find|get|want|wants|searching for)\s+(?:a |an |some )?(?:[\w-]+\s+){0,2}(?:job|work)\b/i.test(text) && !/\btrain(?:ing)?\b/i.test(text)) out.jobGoalStated = true;
 
+  if (/\bno (?:work|job|employment) (?:history|experience)\b|\bnever (?:had a job|worked)\b|\b(?:my|her|his|their) first job\b|\bhaven'?t worked\b/i.test(text)) out.workHistory = 'none';
+  else if (/\b(?:i|she|he|they) (?:have |has )?worked (?:in|at|as)\b|\bi'?ve worked\b|\bused to work\b|\b(?:retired|former|previously)\b|\byears? (?:as|in|of)\b/i.test(text) && !ctx.workHistory) out.workHistory = 'described';
+
   // ── Roles: what they have done vs what they want (occupation taxonomy; vocabulary, not facts) ──
   const roleHits = classify(text, 2).map((h) => h.key).slice(0, 2);
   if (roleHits.length) {
     // "I want to work as an electrician" is a goal, not experience: test the past-work cues without it.
-    const GOAL = /\b(?:want|wants|would like|'d like|hoping|hope|hopes|plan(?:ning)?|planning|aim(?:ing)?|trying|like)\s+to\s+(?:work|start working|be|become|get a job)\b[^.?!]*/gi;
+    const GOAL = /\b(?:(?:want|wants|would like|'d like|hoping|hope|hopes|plan(?:ning)?|planning|aim(?:ing)?|trying|like)\s+to\s+(?:work|start working|be|become|get a job)|(?:'d like|would like|want|wants|looking for|interested in|thinking about|considering)\s+(?:an?|some)?\s*[\w-]*\s*(?:job|role|position|work)|maybe|something (?:in|like))\b[^.?!]*/gi;
     const pastText = text.replace(GOAL, '');
     const goalHits = classify((text.match(GOAL) ?? []).join('. '), 2).map((h) => h.key).slice(0, 2);
     const pastHits = classify(pastText, 2).map((h) => h.key).slice(0, 2);
     const did = /\b(worked|work(?:ing)? as|experience|background|used to|years (?:as|in|of)|(?:spent|for|over) (?:\d+|a few|several|one|two|three|four|five|six|seven|eight|nine|ten|many) years|helped|took care of|cared for|supervised|led|operated|installed|repaired|taught|cooked|cleaned|drove|built|fixed|sold|i did|did (?:the )?\w+ing|handled|ran|managed|i was an?|she was an?|he was an?|previously|have been an?|i'?ve been an?|currently an?)\b/i.test(pastText);
-    const wants = /\b(want|wants|interested|looking for|become|aiming|hoping|would like|get into)\b/i.test(text);
+    const wants = /\b(want|wants|interested|looking for|become|aiming|hoping|would like|'d like|like to|get into|maybe|something in|something like|thinking about|considering|prefer)\b/i.test(text);
     // A role named in a goal is a target; one named alongside past-work cues is experience. "I want to be
     // an electrician. I have 1 year of experience" is both: the experience is in the role they named.
     if (goalHits.length) out.occupations = goalHits;
     if (did) out.experience = pastHits.length ? pastHits : goalHits.length ? goalHits : roleHits;
+    if (did && !ctx.workHistory) out.workHistory = 'described';
     // "Experience installing solar panels, wants a better job" names a past role, not a new target.
     if (wants && !did && !goalHits.length) out.occupations = roleHits;
   }

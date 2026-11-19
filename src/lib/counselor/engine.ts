@@ -140,6 +140,7 @@ export function enforceSingleQuestion(message: string): string {
 function pendingLabelFor(id: string): string {
   const labels: Record<string, string> = {
     audience: 'Who this is for',
+    workHistory: 'Previous work',
     county: 'Location',
     age: 'Age',
     education: 'Education level',

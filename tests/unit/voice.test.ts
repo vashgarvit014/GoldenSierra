@@ -33,7 +33,7 @@ describe('shared voice: person and agreement', () => {
     expect(q('county').prompt('self', ctx())).toBe('Which county are you in?');
     expect(q('county').prompt('helper', ctx({ mode: 'helper' }))).toBe('Which county are they in?');
     expect(q('county').prompt('helper', ctx({ mode: 'helper', pronoun: 'she' }))).toBe('Which county is she in?');
-    expect(q('education').prompt('helper', ctx({ mode: 'helper', pronoun: 'he' }))).toBe('Has he finished high school or a GED?');
+    expect(q('education').prompt('helper', ctx({ mode: 'helper', pronoun: 'he' }))).toBe("What's the highest level of education he has completed?");
     expect(person({ mode: 'helper', pronoun: 'she' }).doHave).toBe('does she have');
   });
   it('the pronoun is picked up from how the helper refers to the person', () => {
@@ -68,6 +68,24 @@ describe('context: goals are not experience; a stated job goal settles "job or t
     for (const t of ['I need a job.', "I'm looking for warehouse work.", 'She wants an office job.']) expect(ruleExtract(t, ctx()).jobGoalStated).toBe(true);
     expect(ruleExtract('I want job training.', ctx()).jobGoalStated).toBeUndefined();
     expect(q('incomeUrgency').applicable!(ctx({ jobGoalStated: true }))).toBe(false);
+  });
+});
+
+describe('background and goals', () => {
+  it('past work is experience and work history, never a career interest', () => {
+    const u = ruleExtract('She worked as a bookkeeper for 6 years.', ctx({ mode: 'helper' }));
+    expect(u.careerInterest).toBeUndefined();
+    expect(u.experience).toEqual(['accounting_assistant']);
+    expect(u.workHistory).toBe('described');
+  });
+  it('"I\'d like an office job, maybe a clerk" names the target role', () => {
+    expect(ruleExtract("I'd like an office job, maybe a clerk.", ctx()).occupations).toContain('clerk');
+    expect(ruleExtract('Something in finance, like a finance director.', ctx())).toMatchObject({ careerInterest: 'finance and accounting', occupations: ['finance_manager'] });
+  });
+  it('lead-ins: no empty dots, no credential the user never named', () => {
+    expect(polishLead('...')).toBe('');
+    expect(polishLead('Associate degree noted for her path.', { userText: 'She has a college degree.' })).toBe('');
+    expect(polishLead('A college degree opens more doors for her.', { userText: 'She has a college degree.' })).toBe('A college degree opens more doors for her.');
   });
 });
 

@@ -84,7 +84,7 @@ const schema = z.object({
   CRAWL_USER_AGENT: z.string().default('GoldenSierraNavigatorBot/1.0'),
   CRAWL_CONCURRENCY: int(3),
   CRAWL_DELAY_MS: int(800),
-  CRAWL_MAX_PAGES: int(300),
+  CRAWL_MAX_PAGES: int(2000),
   CRAWL_MAX_DEPTH: int(3),
   CRAWL_TIMEOUT_MS: int(30_000),
   CRAWL_RESPECT_ROBOTS: bool(true),

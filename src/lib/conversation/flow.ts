@@ -151,6 +151,7 @@ export function uncertaintiesFor(ctx: CounselorContext): string[] {
 
 /** Why a question matters — generic, never a claim about a specific service. */
 const WHY: Record<Question['id'], string> = {
+  workHistory: 'Past jobs decide which roles are related and which skills carry over.',
   audience: 'Services for job seekers and for employers are different.',
   county: 'Offices and providers differ by location.',
   age: 'Age can change which services are relevant.',
@@ -184,7 +185,23 @@ export type GuidedTurnOutput = {
   path: FlowStage[];
 };
 
-const MAX_CLARIFYING = 4;
+const MAX_CLARIFYING = 6;
+/** Background asked before anything else, in this order. */
+const BACKGROUND = ['workHistory', 'education', 'careerInterest'] as const;
+function pendingBackground(ctx: CounselorContext, asked: string[]): boolean {
+  if (ctx.audience === 'employer') return false;
+  return BACKGROUND.some((id) => {
+    const q = QUESTIONS.find((x) => x.id === id)!;
+    return !asked.includes(id) && (q.applicable?.(ctx) ?? true) && !answeredField(q, ctx);
+  });
+}
+function answeredField(q: Question, ctx: CounselorContext): boolean {
+  if (q.id === 'careerInterest') return Boolean(ctx.careerInterest || ctx.occupations?.length);
+  if (q.id === 'workHistory') return Boolean(ctx.workHistory || ctx.experience?.length || Object.keys(ctx.quals ?? {}).some((k) => k.startsWith('exp:')));
+  if (q.id === 'education') return Boolean((ctx.education && ctx.education !== 'unknown') || Object.keys(ctx.quals ?? {}).some((k) => k.startsWith('edu:')));
+  const v = ctx[q.field];
+  return v != null && v !== '' && v !== 'unknown' && !(Array.isArray(v) && v.length === 0);
+}
 
 export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnOutput> {
   const started = Date.now();
@@ -196,7 +213,18 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   const { updates } = await extractContext(input.message, before, history);
   // A short reply ("Yes", "2-4 years") is read against the qualification question it answers.
   const pendingAnswer = answerToPending(input.flow.pendingQuestion, input.message);
-  const ctx = mergeContext(mergeContext(before, updates), pendingAnswer);
+  let ctx = mergeContext(mergeContext(before, updates), pendingAnswer);
+  // Only a reply that is about work counts as their work history ("Placer County" answers something else).
+  const answersSomethingElse = Object.keys(updates).some((k) => !['occupations', 'experience', 'workHistory', 'quals', 'careerInterest', 'audience', 'jobGoalStated', 'employmentStatus'].includes(k));
+  if (input.flow.pendingQuestion === 'workHistory' && !before.workHistory && !answersSomethingElse) {
+    // "Cashier at Safeway" answers "what have you done before?": the roles named are past work, not a goal.
+    const named = updates.occupations?.filter((o) => !(before.occupations ?? []).includes(o)) ?? [];
+    ctx = {
+      ...ctx,
+      workHistory: ctx.workHistory ?? (/\bno\b|none|never/i.test(input.message) ? 'none' : 'described'),
+      ...(named.length ? { experience: [...new Set([...(ctx.experience ?? []), ...named])], occupations: (ctx.occupations ?? []).filter((o) => !named.includes(o)) } : {}),
+    };
+  }
   const corrections = changedFields(before, ctx);
   const beforeFacts = knownFactsRecord(before);
   const nowFacts = knownFactsRecord(ctx);
@@ -271,7 +299,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     (hadResults && contextChanged) ||
     asked.length >= MAX_CLARIFYING ||
     // Not while a mandatory requirement of a shortlisted listing hinges on something we can still ask.
-    (readyForResults(ctx, matches, asked, programs, jobs) && !qual);
+    (readyForResults(ctx, matches, asked, programs, jobs) && !qual && !pendingBackground(ctx, asked));
   // Never put the same question twice in a row: if the reply answered something else, move on to the
   // next most useful question; if nothing else is worth asking, show results rather than badger.
   const pending = input.flow.pendingQuestion;
@@ -286,7 +314,20 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   // "I need a job" already says which: then the next most useful detail is asked instead.
   const statedJobGoal = Boolean(ctx.jobGoalStated) || Boolean(ctx.employmentStatus);
   const noDirection = !statedJobGoal && !ctx.careerInterest && !ctx.occupations?.length && !ctx.experience?.length && !ctx.incomeUrgency && ctx.audience !== 'employer' && !asked.includes('incomeUrgency');
-  const choice = !ready && qual ? { question: qual.question, gain: 1 } : !ready && noDirection ? { question: goal, gain: 1 } : fresh ?? (reask?.question.id === pending ? reask : null);
+  // A counselor's order: what they want (when unclear), then their background — previous work and
+  // education — then the job they hope to find, then the published requirements of the matching roles.
+  const background = BACKGROUND
+    .map((id) => QUESTIONS.find((q) => q.id === id)!)
+    .find((q) => !asked.includes(q.id) && (q.applicable?.(ctx) ?? true) && !answeredField(q, ctx));
+  // When the matching listings publish a requirement on the same subject, ask that sharper version instead:
+  // "What's your highest education? The Accounting Assistant listing asks for this." / "How many years of
+  // office experience…?" — the answer then decides real requirements, not just the conversation.
+  const sharper = background && qual && ((background.id === 'education' && qual.key === 'edu') || (background.id === 'workHistory' && qual.key.startsWith('exp:'))) ? qual.question : null;
+  const choice = ready ? null
+    : noDirection ? { question: goal, gain: 1 }
+      : background ? { question: sharper ?? background, gain: 1 }
+        : qual ? { question: qual.question, gain: 1 }
+          : fresh ?? (reask?.question.id === pending ? reask : null);
   const subject = SUBJECT[ctx.mode];
 
   // ── CLARIFY ──
@@ -376,7 +417,16 @@ export async function verifiedResults(a: {
   // Needs that no cited passage speaks to are said plainly, rather than implied to be covered.
   const citedChunks = new Set(done.payload.citations.flatMap((c) => c.chunkIds ?? []));
   const covered = new Set([...citedChunks].map((id) => focusOf.get(id)?.key).filter(Boolean));
-  const open = jobs.matches.filter((m) => m.listingStatus !== 'closed');
+  // The same vacancy is often posted on more than one indexed page (an agency's "top picks" and the full
+  // listing table): show it once, keeping the better-ranked copy.
+  const seenJob = new Set<string>();
+  const jobKey = (m: JobMatch) => `${m.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()}|${(m.employer ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').slice(0, 2).join(' ')}`;
+  const open = jobs.matches.filter((m) => m.listingStatus !== 'closed').filter((m) => {
+    const k = jobKey(m);
+    if (seenJob.has(k)) return false;
+    seenJob.add(k);
+    return true;
+  });
   // A listing with a mandatory published requirement they said they don't meet is never a "best match",
   // however close the occupation: it is shown separately, with what is missing.
   const fits = open.filter((m) => m.qualification.unmet === 0);
@@ -389,7 +439,12 @@ export async function verifiedResults(a: {
   const answer = composeResults({
     ctx: a.ctx, focuses, verified: done.answer, answered, corrections: a.corrections, uncertainties: a.uncertainties,
     uncovered: answered || bestJobs.length + relatedJobs.length + gapJobs.length ? uncovered : [], refine: a.refine,
-    jobs: a.jobs ? { best: bestJobs.length, related: relatedJobs.length, gaps: gapJobs.length, closed: jobs.matches.length - open.length, total: jobs.total, unknown: [...bestJobs, ...relatedJobs].filter((m) => m.qualification.unknown > 0).length } : undefined,
+    jobs: a.jobs ? {
+      best: bestJobs.length, related: relatedJobs.length, gaps: gapJobs.length, closed: jobs.matches.length - open.length, total: jobs.total,
+      unknown: [...bestJobs, ...relatedJobs].filter((m) => m.qualification.unknown > 0).length,
+      // Titles and employers exactly as the indexed listings state them.
+      names: [...bestJobs, ...relatedJobs, ...gapJobs].slice(0, 8).map((m) => `${m.title}${m.employer ? ` — ${m.employer}` : ''}`),
+    } : undefined,
   });
   const p = roleProfile(a.ctx);
   const isTraining = (r: Recommendation) => /training|scholarship|internship|metrix|learning|class/i.test(`${r.slug ?? ''} ${r.name}`);
@@ -441,7 +496,7 @@ export function composeResults(a: {
   uncovered?: string[];
   refine: string | null;
   /** Counts of role-matched indexed job listings (shown as cards beside the message). */
-  jobs?: { best: number; related: number; gaps?: number; closed: number; total: number; unknown?: number };
+  jobs?: { best: number; related: number; gaps?: number; closed: number; total: number; unknown?: number; names?: string[] };
 }): string {
   const s = SUBJECT[a.ctx.mode];
   const join = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : xs[0] ?? '');
@@ -454,9 +509,16 @@ export function composeResults(a: {
   const jobLine = !j
     ? null
     : anyJobs
-      ? `I also checked the ${j.total} indexed job listings against ${s.possessive} role and the published requirements: ${j.best ? `${j.best} ${j.best === 1 ? 'is' : 'are'} the kind of role ${s.pronoun} described` : `none is the exact role ${s.pronoun} described with no requirement gap`}${j.related ? `, ${j.related} ${j.related === 1 ? 'is a related role' : 'are related roles'}` : ''}${j.gaps ? `, and ${j.gaps} ${j.gaps === 1 ? 'asks' : 'ask'} for a qualification ${s.pronoun} said ${s.pronoun === 'you' ? "you don't" : "they don't"} have yet` : ''}${closedNote}.${j.unknown ? ` For ${j.unknown} of the matches, some published requirements couldn't be checked against what ${s.pronoun} shared — each card shows which.` : ''} They are listed below with their sources.`
+      ? `I also checked the ${j.total} indexed job listings against ${s.possessive} role and the published requirements: ${j.best ? `${j.best} ${j.best === 1 ? 'is' : 'are'} the kind of role ${s.pronoun} described` : `none is the exact role ${s.pronoun} described with no requirement gap`}${j.related ? `, ${j.related} ${j.related === 1 ? 'is a related role' : 'are related roles'}` : ''}${j.gaps ? `, and ${j.gaps} ${j.gaps === 1 ? 'asks' : 'ask'} for a qualification ${s.pronoun} said ${s.pronoun === 'you' ? "you don't" : "they don't"} have yet` : ''}${closedNote}.${j.unknown ? ` For ${j.unknown} of the matches, some published requirements couldn't be checked against what ${s.pronoun} shared — each card shows which.` : ''}${j.names?.length ? `\n\nMatching listings: ${j.names.join('; ').replace(/\.$/, '')}.` : ''}\n\nEach is listed below with its source.`
       : `I checked the ${j.total} indexed job listings and found none related to the roles ${s.pronoun} described${closedNote}.`;
-  if (!a.answered) {
+  if (!a.answered && anyJobs && jobLine) {
+    // Matching job listings are the answer; the missing training information is a footnote, not the headline.
+    parts.push(
+      `${updated}${jobLine.replace(/^I also checked/, 'I checked')}`,
+      `Whether ${s.pronoun} meet a listing's requirements is for the employer to decide; check the posting before applying.`,
+      `For ${list}: ${NO_ANSWER_TEXT}`,
+    );
+  } else if (!a.answered) {
     parts.push(`${updated}I searched the indexed knowledge base for ${list}.`, a.verified === GENERATION_FAILED_TEXT ? GENERATION_FAILED_TEXT : NO_ANSWER_TEXT);
     if (jobLine) parts.push(jobLine);
     if (anyJobs) parts.push(`Whether ${s.pronoun} meet a listing's requirements is for the employer to decide; check the posting before applying.`);

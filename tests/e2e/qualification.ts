@@ -61,7 +61,7 @@ async function verifyRequirements(jobs: JobMatch[]): Promise<{ ok: boolean; why:
   try {
     // 1. Degree-bearing role (Accounting Assistant: "Relevant college degree, or equivalent combination…"), education unknown.
     const it = await session('self');
-    const it1 = await it('I want to work as an accounting assistant doing bookkeeping. I live in Roseville.');
+    const it1 = await it("I've worked in retail for two years and I want to work as an accounting assistant doing bookkeeping. I live in Roseville.");
     check('1: education unknown → the next question asks for it, because shortlisted listings publish an education requirement', /highest level of education|college degree/i.test(it1.payload.flow?.question ?? '') && /listing/i.test(it1.payload.flow?.question ?? ''), it1.payload.flow?.question ?? it1.answer);
     const itR = await it('Show me the options you have so far', true);
     const itRes = itR.payload.flow?.stage === 'SHOWING_RESULTS' ? itR : await it('Show results anyway');

@@ -94,7 +94,7 @@ export function Crawler() {
   const canEdit = role === 'EDITOR' || role === 'ADMIN';
   const canDelete = role === 'ADMIN';
 
-  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[]; policy?: { mode: 'open' | 'restricted'; restrictedTo: string[]; httpsRequired: boolean } }>('/api/admin/sources');
+  const { data: sourceData, reload: reloadSources } = useApi<{ sources: Source[]; policy?: { mode: 'open' | 'restricted'; restrictedTo: string[]; httpsRequired: boolean; maxPagesCap?: number } }>('/api/admin/sources');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [queue, setQueue] = useState<QueueHealth | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -201,10 +201,14 @@ export function Crawler() {
         error?: string;
         issues?: { path?: string; message?: string }[];
         crawl?: { jobId?: string; mode?: string; error?: string } | null;
+        updated?: boolean;
+        source?: { name?: string; maxPages?: number; maxDepth?: number };
       };
       if (!res.ok) throw new Error(apiMessage(json, 'Could not add the source'));
 
-      if (json.crawl?.error) {
+      if (json.updated) {
+        notify(`${json.source?.name ?? 'That site'} is already a source — limits updated (depth ${json.source?.maxDepth}, up to ${json.source?.maxPages} pages) and a re-crawl ${json.crawl && !json.crawl.error ? 'started' : 'could not be queued'}`);
+      } else if (json.crawl?.error) {
         setError(`Source saved, but the first crawl could not be queued: ${json.crawl.error}`);
       } else {
         notify(json.crawl?.mode === 'queued' ? 'Source added — first crawl queued for the worker' : 'Source added — first crawl running');
@@ -375,7 +379,7 @@ export function Crawler() {
             </label>
             <label className="fine">
               Max pages{' '}
-              <input id="maxPagesInput" className="limit-input" type="number" min={1} max={2000} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} style={{ width: 100 }} />
+              <input id="maxPagesInput" className="limit-input" type="number" min={1} max={sourceData?.policy?.maxPagesCap ?? 2000} title="To change an existing source's limits, enter its URL again with the new limits."  value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value) || 1)} style={{ width: 100 }} />
             </label>
           </div>
           <p className="info-note" id="policyNote" style={{ marginTop: 10 }}>
@@ -458,7 +462,7 @@ export function Crawler() {
                             </>
                           )}
                           <div className="fine">
-                            scope {s.scopeHost ?? '—'} · depth {s.maxDepth} · up to {s.maxPages} pages{s.respectRobots && ' · robots ✓'}
+                            scope {s.scopeHost ?? '—'} · depth {s.maxDepth} · up to {Math.min(s.maxPages, sourceData?.policy?.maxPagesCap ?? s.maxPages)} pages{(sourceData?.policy?.maxPagesCap ?? Infinity) < s.maxPages && ` (server limit ${sourceData?.policy?.maxPagesCap})`}{s.respectRobots && ' · robots ✓'}
                           </div>
                           <div className="fine" data-testid="last-success">
                             {s.lastCrawledAt ? `last successful crawl ${relativeTime(s.lastCrawledAt)}` : 'no successful crawl yet'}

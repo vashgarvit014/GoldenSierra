@@ -168,7 +168,7 @@ describe('selectNextQuestion', () => {
     const ctx = base({
       county: 'Placer', city: 'auburn', careerInterest: 'healthcare', education: 'no_hs_diploma',
       age: 19, transportation: 'none', incomeUrgency: 'immediate', employmentStatus: 'unemployed',
-      audience: 'job_seeker', population: ['former_foster_youth'],
+      audience: 'job_seeker', population: ['former_foster_youth'], workHistory: 'none',
     });
     expect(selectNextQuestion(ctx, candidates, [])).toBeNull();
   });

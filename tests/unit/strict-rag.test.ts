@@ -248,3 +248,12 @@ describe('sentence handling', () => {
     expect(zh.answer).not.toMatch(/[㐀-鿿]/);
   });
 });
+
+describe('invented counts', () => {
+  it('"lists three positions" keeps the sentence without the made-up count', () => {
+    const ev = src('c', 'Job Search. Director of Finance at El Dorado Irrigation District. Asset Management Analyst at El Dorado Irrigation District. Results Found: 4');
+    const v = verifyAnswer('The job board lists three positions at El Dorado Irrigation District: Director of Finance and Asset Management Analyst. [1]', [ev]);
+    expect(v.answer).toMatch(/lists positions at El Dorado Irrigation District/);
+    expect(v.answer).not.toMatch(/three/);
+  });
+});

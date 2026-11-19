@@ -29,6 +29,7 @@ import { person } from '../conversation/voice';
  */
 
 export type QuestionId =
+  | 'workHistory'
   | 'audience'
   | 'county'
   | 'age'
@@ -75,6 +76,26 @@ export const QUESTIONS: Question[] = [
     ],
   },
   {
+    // Previous jobs are the first thing a counselor asks about: they decide related and transferable roles.
+    id: 'workHistory',
+    field: 'workHistory',
+    baseValue: 0.8,
+    prompt: (mode, ctx) =>
+      mode === 'helper'
+        ? `What kind of work ${who(mode, ctx).haveQ} done before? A recent job or two is enough.`
+        : 'What kind of work have you done before? Your last job or two is enough.',
+    quickReplies: (mode) => {
+      const S = mode === 'helper' ? 'They have' : 'I have';
+      return [
+        { label: 'Retail / customer service', value: `${S} worked in retail and customer service` },
+        { label: 'Warehouse / labor', value: `${S} worked in warehouse and general labor jobs` },
+        { label: 'Office / admin', value: `${S} worked in an office administrative job` },
+        { label: 'No work history yet', value: 'No work history yet' },
+      ];
+    },
+    applicable: seeker,
+  },
+  {
     id: 'county',
     field: 'county',
     baseValue: 0.85,
@@ -90,7 +111,7 @@ export const QUESTIONS: Question[] = [
     id: 'careerInterest',
     field: 'careerInterest',
     baseValue: 0.7,
-    prompt: (mode, ctx) => `What kind of work ${who(mode, ctx).be} ${who(mode, ctx).subj} hoping to find? A rough idea is fine.`,
+    prompt: (mode, ctx) => `What kind of job ${who(mode, ctx).be} ${who(mode, ctx).subj} hoping to find? A rough idea is fine.`,
     quickReplies: () => [
       { label: 'Healthcare', value: 'Interested in healthcare' },
       { label: 'Trades / construction', value: 'Interested in the trades or construction' },
@@ -103,12 +124,12 @@ export const QUESTIONS: Question[] = [
     id: 'education',
     field: 'education',
     baseValue: 0.65,
-    prompt: (mode, ctx) => `${cap(who(mode, ctx).haveQ)} finished high school or a GED?`,
+    prompt: (mode, ctx) => `What's the highest level of education ${who(mode, ctx).subj} ${who(mode, ctx).have} completed?`,
     quickReplies: () => [
-      { label: 'GED / diploma done', value: 'GED or high school diploma completed' },
-      { label: 'Still working on it', value: 'Still working on the GED' },
-      { label: 'Not started', value: 'No high school diploma or GED yet' },
+      { label: 'No diploma yet', value: 'No high school diploma or GED yet' },
+      { label: 'High school / GED', value: 'GED or high school diploma completed' },
       { label: 'Some college', value: 'Has some college' },
+      { label: 'College degree', value: 'Has a college degree' },
     ],
     applicable: seeker,
   },

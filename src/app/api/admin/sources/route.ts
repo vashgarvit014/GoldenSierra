@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { AdminRole, JobType, SourceType } from '@prisma/client';
+import { AdminRole, JobStatus, JobType, SourceType } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { AppError, badRequest, withErrorHandling } from '@/lib/errors';
 import { recordAudit, requireAdmin } from '@/lib/auth';
@@ -185,12 +185,26 @@ export const POST = withErrorHandling(async (request: Request) => {
     });
     const clash = existing.find((e) => sourceKey(e.rootUrl) === key);
     if (clash) {
-      throw new AppError(
-        `This site is already a source: "${clash.name}" (${clash.rootUrl}).`,
-        409,
-        'duplicate_source',
-        { sourceId: clash.id },
-      );
+      // Adding a site that is already a source means "crawl it with these limits": apply the new depth
+      // and page limit to that source and re-crawl it, rather than refusing and silently keeping the old ones.
+      const active = await prisma.ingestionJob.findFirst({ where: { sourceId: clash.id, status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] } } });
+      if (active) {
+        throw new AppError(`"${clash.name}" is already being crawled (job ${active.id}). Wait for it to finish, or cancel it, before changing its limits.`, 409, 'crawl_in_progress', { sourceId: clash.id });
+      }
+      const updated = await prisma.knowledgeSource.update({ where: { id: clash.id }, data: { maxDepth: body.maxDepth, maxPages: body.maxPages } });
+      await recordAudit(session.userId, 'update', 'KnowledgeSource', clash.id, { maxDepth: body.maxDepth, maxPages: body.maxPages, trigger: 'source_re_added' });
+      let crawl: { jobId: string; mode: 'queued' | 'inline' } | { error: string } | null = null;
+      if (body.startCrawl && updated.status !== 'PAUSED') {
+        try {
+          const jobId = await createJob(JobType.CRAWL, updated.id);
+          const { mode } = await enqueueJob(jobId);
+          await recordAudit(session.userId, 'start_ingestion', 'IngestionJob', jobId, { type: 'CRAWL', mode, trigger: 'source_re_added' });
+          crawl = { jobId, mode };
+        } catch (err) {
+          crawl = { error: err instanceof Error ? err.message : 'Could not queue the crawl' };
+        }
+      }
+      return NextResponse.json({ source: updated, crawl, updated: true, queue: await queueHealth() }, { status: 200 });
     }
   }
 
