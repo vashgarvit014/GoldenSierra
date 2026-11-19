@@ -1,0 +1,965 @@
+{
+  "labelled": 8,
+  "labelledRight": 7,
+  "report": [
+    {
+      "scenario": "1. White-collar, education not mentioned",
+      "mode": "self",
+      "expected": "Asks a qualification question (education or experience) because shortlisted office listings publish requirements; no degree assumed for listings that do not require one.",
+      "pass": true,
+      "questionsAsked": [
+        "What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "Before I show results — one detail would make them more accurate. How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it.",
+        "Do you need income coming in soon, or is there room to train first?"
+      ],
+      "questionIds": [
+        "qual:edu",
+        "qual:exp:administrative",
+        "qual:exp:supervisory",
+        "incomeUrgency"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Office work | ✓ | Education | Needs GED / HiSET | ✓ | Location & transport | Roseville, Placer County | ✓ | Looking as | Job seeker",
+      "groups": {
+        "best": [],
+        "related": [
+          "Accounting Assistant",
+          "Administrative Services Officer I"
+        ],
+        "gaps": [
+          "Administrative Legal Clerk - Entry"
+        ]
+      },
+      "cards": [
+        {
+          "title": "Accounting Assistant",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Relevant college degree, or equivalent combination of education and experience, in accounting/bookkeeping"
+          ]
+        },
+        {
+          "title": "Administrative Services Officer I",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Multiple qualifying paths: 1 yr supervisory experience, OR bachelor's degree in a related field, OR 1-2 yrs equivalent admin/fiscal experience in county/state service"
+          ]
+        },
+        {
+          "title": "Administrative Legal Clerk - Entry",
+          "kind": "sector",
+          "fit": "gaps",
+          "requirements": [
+            "REQ unknown: 2 years of clerical experience",
+            "REQ unmet: equivalent to completion of 12th grade",
+            "pref unknown: may need a valid driver's license"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/metrix",
+        "https://goldensierra.com/event/resume-cover-letter-workshop-2",
+        "https://goldensierra.com/event/how-to-work-a-job-fair-3"
+      ],
+      "transcript": [
+        "U: I'm looking for an office job in Roseville.",
+        "A: Thanks, I've noted you're looking for office work in Roseville, Placer County. Next I'll look at how published job requirements for office roles in that area match your background. What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "U: I haven't completed a high school diploma or GED",
+        "A: Thanks for noting you haven't completed a high school diploma or GED. Next I'll see how that factors into the education requirements shown on office job postings in Roseville. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for office work training, finishing a GED or diploma and services in or near Roseville. Here is what they describe: - Metrix Learning: offers instant access to over 5,000 courses, including Microsoft Office, Project Management, Leadership, Information Technology, Health and Safety, and Work Readiness, which supports office work training. "
+      ],
+      "checks": [
+        {
+          "label": "a qualification question was asked before results",
+          "ok": true,
+          "detail": "What's the highest level of education you have completed? 3 of the matching listings ask for it. || How many years of administrative & office experience do you have? 2 of the matching listings ask for it. || Before I show results — one detail would make them more accurate. How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it. || Do you need income coming in soon, or is there room to train first?"
+        },
+        {
+          "label": "Legal Clerk (no degree requirement) is not marked as needing a degree",
+          "ok": true
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nOffice work\n✓\nEducation\nNeeds GED / HiSET\n✓\nLocation & transport\nRoseville, Placer County\n✓\nLooking as\nJob seeker"
+        }
+      ]
+    },
+    {
+      "scenario": "2. Healthcare, no certification",
+      "mode": "self",
+      "expected": "Mandatory certifications checked against the listing: the indexed caregiver listing provides its certificate after hire, so no certification is required or invented; it is not shown as unmet.",
+      "pass": true,
+      "questionsAsked": [
+        "Do you need income coming in soon, or is there room to train first?"
+      ],
+      "questionIds": [
+        "incomeUrgency"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Healthcare | ✓ | Location & transport | Auburn, Placer County | ✓ | Looking as | Job seeker",
+      "groups": {
+        "best": [],
+        "related": [
+          "In-Home Senior Care (Caregiver)"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "In-Home Senior Care (Caregiver)",
+          "kind": "sector",
+          "fit": "no_published_requirements",
+          "requirements": []
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/event/job-connections-sutter-health-uc-davis-center-of-excellence-in-pharma"
+      ],
+      "transcript": [
+        "U: I want a healthcare job near Auburn. I don't have any certifications.",
+        "A: I'll look at whether you need income soon or have time for training, since that shapes the next step. Do you need income coming in soon, or is there room to train first?",
+        "U: Show me the options you have so far",
+        "A: Based on what you've shared, I searched the indexed sources for healthcare training and services in or near Auburn. Here is what they describe: Job Connections: Sutter Health, UC Davis, Center of Excellence in Pharma is a free, monthly hybrid event (in-person or via Zoom) that helps job seekers learn about local employment opportunities and gain insights on pursuing a career in healthcare, with pr"
+      ],
+      "checks": [
+        {
+          "label": "caregiver listing shown, with no mandatory certification",
+          "ok": true
+        },
+        {
+          "label": "no invented CNA/certification requirement in the message or cards",
+          "ok": true
+        },
+        {
+          "label": "caregiver not in \"needs a qualification first\"",
+          "ok": true
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nHealthcare\n✓\nLocation & transport\nAuburn, Placer County\n✓\nLooking as\nJob seeker"
+        }
+      ]
+    },
+    {
+      "scenario": "3. Green-collar, solar experience",
+      "mode": "self",
+      "expected": "Related roles (Electrician, Traffic/Lighting Technician) found via transferable experience; their experience requirements stay UNKNOWN (solar ≠ electrician years); shown as related, not best.",
+      "pass": true,
+      "questionsAsked": [
+        "Do you have a driver's license? 2 of the matching listings ask for it.",
+        "Before I show results — one detail would make them more accurate. What's the highest level of education you have completed? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "Do you have an IMSA traffic signal certification? The Traffic Control & Lighting Technician I/II listing asks for it."
+      ],
+      "questionIds": [
+        "qual:cert:drivers_license",
+        "qual:edu",
+        "qual:cert:imsa"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Looking as | Job seeker | ✓ | Experience | Solar PV installer | ✓ | Experience (years) | green energy: 4 years",
+      "groups": {
+        "best": [],
+        "related": [
+          "Electrician",
+          "Traffic Control & Lighting Technician I/II"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "Electrician",
+          "kind": "related",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: 5-yr accredited electrical apprenticeship OR 5 yrs full-time experience as an electrician",
+            "REQ unknown: valid CA Class C+ driver's license"
+          ]
+        },
+        {
+          "title": "Traffic Control & Lighting Technician I/II",
+          "kind": "related",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: HS diploma + 1 yr (Level I) or 3 yrs (Level II) relevant experience",
+            "REQ unknown: IMSA Traffic Signal Technician certification required",
+            "REQ unknown: CA Class C driver's license"
+          ]
+        }
+      ],
+      "citations": [],
+      "transcript": [
+        "U: I have 4 years of experience installing solar panels and want a better job.",
+        "A: Thanks for sharing your 4 years of solar PV installation experience. Now I'll look for published job requirements that match your background. Do you have a driver's license? 2 of the matching listings ask for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. What's the highest level of education you have completed? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "U: Show results anyway",
+        "A: I searched the indexed knowledge base for the request. I couldn't find enough information about that in the currently indexed knowledge base. I also checked the 12 indexed job listings against your role and the published requirements: none is the exact role you described with no requirement gap, 2 are related roles. For 2 of the matches, some published requirements couldn't be checked against what"
+      ],
+      "checks": [
+        {
+          "label": "electrician or lighting technician found as a related role",
+          "ok": true
+        },
+        {
+          "label": "none of them presented as best match",
+          "ok": true
+        },
+        {
+          "label": "requirement /5 yrs full-time experience/ on /^Electrician$/ is unknown",
+          "ok": true,
+          "detail": "got unknown"
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nLooking as\nJob seeker\n✓\nExperience\nSolar PV installer\n✓\nExperience (years)\ngreen energy: 4 years"
+        }
+      ]
+    },
+    {
+      "scenario": "4. Entry-level, no degree required",
+      "mode": "self",
+      "expected": "Legal Clerk publishes \"12th grade\" and \"2 years clerical experience\" — no degree. No degree question; experience asked instead.",
+      "pass": false,
+      "questionsAsked": [
+        "Have you completed a college degree? 2 of the matching listings ask for it.",
+        "Before I show results — one detail would make them more accurate. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it."
+      ],
+      "questionIds": [
+        "qual:edu",
+        "qual:exp:administrative",
+        "qual:exp:supervisory"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Office work | ✓ | Education | GED or diploma complete | ✓ | Location & transport | Auburn, Placer County | ✓ | Employment | Unemployed | ✓ | Looking as | Job seeker | ✓ | Role wanted | Clerk / records & legal clerk",
+      "groups": {
+        "best": [
+          "Administrative Legal Clerk - Entry"
+        ],
+        "related": [
+          "Administrative Services Officer I",
+          "Accounting Assistant"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "Administrative Legal Clerk - Entry",
+          "kind": "exact",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: 2 years of clerical experience",
+            "REQ met: equivalent to completion of 12th grade",
+            "pref unknown: may need a valid driver's license"
+          ]
+        },
+        {
+          "title": "Administrative Services Officer I",
+          "kind": "related",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Multiple qualifying paths: 1 yr supervisory experience, OR bachelor's degree in a related field, OR 1-2 yrs equivalent admin/fiscal experience in county/state service"
+          ]
+        },
+        {
+          "title": "Accounting Assistant",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Relevant college degree, or equivalent combination of education and experience, in accounting/bookkeeping"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/event/job-connections-public-sector",
+        "https://goldensierra.com/metrix",
+        "https://goldensierra.com/help-for-job-seekers/jobs",
+        "https://goldensierra.com/help-for-job-seekers"
+      ],
+      "transcript": [
+        "U: I want an entry-level office clerk job. I have my high school diploma. I live in Auburn.",
+        "A: I've noted you're aiming for an entry-level office clerk role, with your diploma complete and Auburn as your home base. I'll look at how the published openings match that clerk focus and your local area. Have you completed a college degree? 2 of the matching listings ask for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for office work training, finding paid work soon and services in or near Auburn. Here is what they describe: The services described that could help are Metrix Learning, Weekly Job Openings, Help for Job Seekers, and Job Connections: Public Sector. [1,2,3] Metrix Learning offers instant access to over 5,000 courses, including Microsoft Off"
+      ],
+      "checks": [
+        {
+          "label": "no degree question asked",
+          "ok": false,
+          "detail": "Have you completed a college degree? 2 of the matching listings ask for it. || Before I show results — one detail would make them more accurate. How many years of administrative & office experience do you have? 2 of the matching listings ask for it. || How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it."
+        },
+        {
+          "label": "requirement /12th grade/ on /Legal Clerk/ is met",
+          "ok": true,
+          "detail": "got met"
+        },
+        {
+          "label": "requirement /clerical experience/ on /Legal Clerk/ is met",
+          "ok": false,
+          "detail": "got unknown"
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nOffice work\n✓\nEducation\nGED or diploma complete\n✓\nLocation & transport\nAuburn, Placer County\n✓\nEmployment\nUnemployed\n✓\nLooking as\nJob seeker\n✓\nRole wanted\nClerk / records & legal clerk"
+        }
+      ]
+    },
+    {
+      "scenario": "5. Missing education is unknown, not failed",
+      "mode": "self",
+      "expected": "Accounting Assistant (\"Relevant college degree, or equivalent…\"): with education never stated, requirement UNKNOWN; card not in the gap group.",
+      "pass": true,
+      "questionsAsked": [
+        "What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "Before I show results — one detail would make them more accurate. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it."
+      ],
+      "questionIds": [
+        "qual:edu",
+        "qual:exp:administrative",
+        "qual:exp:supervisory"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Accounting assistant | ✓ | Looking as | Job seeker | ✓ | Experience | Accounting assistant / bookkeeper | ✓ | Experience (years) | administrative & office: yes",
+      "groups": {
+        "best": [
+          "Accounting Assistant"
+        ],
+        "related": [
+          "Administrative Services Officer I",
+          "Administrative Legal Clerk - Entry"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "Accounting Assistant",
+          "kind": "exact",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Relevant college degree, or equivalent combination of education and experience, in accounting/bookkeeping"
+          ]
+        },
+        {
+          "title": "Administrative Services Officer I",
+          "kind": "related",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Multiple qualifying paths: 1 yr supervisory experience, OR bachelor's degree in a related field, OR 1-2 yrs equivalent admin/fiscal experience in county/state service"
+          ]
+        },
+        {
+          "title": "Administrative Legal Clerk - Entry",
+          "kind": "related",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: 2 years of clerical experience",
+            "REQ unknown: equivalent to completion of 12th grade",
+            "pref unknown: may need a valid driver's license"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/elevate"
+      ],
+      "transcript": [
+        "U: I want to work as an accounting assistant.",
+        "A: Thanks for sharing that you want to work as an accounting assistant. With your administrative and office background, I'll look at how that experience lines up with what employers typically ask for in this role. What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for accounting assistant training. Here is what they describe: The Learning Elevate Your Future available job training program, offered in partnership with Sierra College, prepares people for good jobs in target industry sectors and includes an Accounting career pathway among over 20 options. [1] I also checked the 12 indexed job listings"
+      ],
+      "checks": [
+        {
+          "label": "Accounting Assistant not in the gap group",
+          "ok": true
+        },
+        {
+          "label": "requirement /college degree/i on /Accounting Assistant/ is unknown",
+          "ok": true,
+          "detail": "got unknown"
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nAccounting assistant\n✓\nLooking as\nJob seeker\n✓\nExperience\nAccounting assistant / bookkeeper\n✓\nExperience (years)\nadministrative & office: yes"
+        }
+      ]
+    },
+    {
+      "scenario": "6. Insufficient qualifications",
+      "mode": "self",
+      "expected": "Electrician (5 yrs or apprenticeship; Class C license) with 2 stated years and no license → both unmet; shown under \"needs a qualification first\", not as best.",
+      "pass": true,
+      "questionsAsked": [
+        "What's the highest level of education you have completed? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "Before I show results — one detail would make them more accurate. Do you have an IMSA traffic signal certification? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "How many years of public works & infrastructure experience do you have? The Traffic Control & Lighting Technician I/II listing asks for it."
+      ],
+      "questionIds": [
+        "qual:edu",
+        "qual:cert:imsa",
+        "qual:exp:public_works"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | The trades | ✓ | Experience | Electrician | ✓ | Certifications & licenses | no driver's license | ✓ | Experience (years) | skilled trades: 2 years",
+      "groups": {
+        "best": [],
+        "related": [],
+        "gaps": [
+          "Traffic Control & Lighting Technician I/II",
+          "Electrician"
+        ]
+      },
+      "cards": [
+        {
+          "title": "Traffic Control & Lighting Technician I/II",
+          "kind": "related",
+          "fit": "gaps",
+          "requirements": [
+            "REQ unknown: HS diploma + 1 yr (Level I) or 3 yrs (Level II) relevant experience",
+            "REQ unknown: IMSA Traffic Signal Technician certification required",
+            "REQ unmet: CA Class C driver's license"
+          ]
+        },
+        {
+          "title": "Electrician",
+          "kind": "exact",
+          "fit": "gaps",
+          "requirements": [
+            "REQ unmet: 5-yr accredited electrical apprenticeship OR 5 yrs full-time experience as an electrician",
+            "REQ unmet: valid CA Class C+ driver's license"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/event/skilled-trades-job-fair"
+      ],
+      "transcript": [
+        "U: I worked as an electrician for 2 years and I don't have a driver's license.",
+        "A: I've noted your two years of electrician experience and that you don't have a driver's license. Next, I'll look at how published job requirements align with your experience and license situation. What's the highest level of education you have completed? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. Do you have an IMSA traffic signal certification? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for the trades training. Here is what they describe: The Building Careers Foundation's Skilled Trades Job Fair connects job seekers with top employers in the homebuilding and construction industries who are hiring now and lets attendees learn about free training programs and certifications. [1] I also checked the 12 indexed job listings a"
+      ],
+      "checks": [
+        {
+          "label": "Electrician in the gap group",
+          "ok": true,
+          "detail": "{\"best\":[],\"related\":[],\"gaps\":[\"Traffic Control & Lighting Technician I/II\",\"Electrician\"]}"
+        },
+        {
+          "label": "Electrician not presented as best/related match",
+          "ok": true
+        },
+        {
+          "label": "requirement /5 yrs full-time experience/ on /^Electrician$/ is unmet",
+          "ok": true,
+          "detail": "got unmet"
+        },
+        {
+          "label": "requirement /driver/ on /^Electrician$/ is unmet",
+          "ok": true,
+          "detail": "got unmet"
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nThe trades\n✓\nExperience\nElectrician\n✓\nCertifications & licenses\nno driver's license\n✓\nExperience (years)\nskilled trades: 2 years"
+        }
+      ]
+    },
+    {
+      "scenario": "7. Correction updates recommendations",
+      "mode": "self",
+      "expected": "No diploma → Legal Clerk \"12th grade\" unmet (gap). Corrected to GED + 3 years clerical → met; Clerk leaves the gap group.",
+      "pass": true,
+      "questionsAsked": [
+        "How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "Before I show results — one detail would make them more accurate. How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it.",
+        "Which county are you in? It decides which offices and providers are reachable.",
+        "Have you completed a college degree? The Accounting Assistant listing asks for it."
+      ],
+      "questionIds": [
+        "qual:exp:administrative",
+        "qual:exp:supervisory",
+        "county",
+        "qual:edu"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Office work | ✓ | Education | GED or diploma complete | ✓ | Looking as | Job seeker | ✓ | Role wanted | Clerk / records & legal clerk | ✓ | Experience | Clerk / records & legal clerk | ✓ | Experience (years) | administrative & office: 3 years",
+      "groups": {
+        "best": [
+          "Administrative Legal Clerk - Entry"
+        ],
+        "related": [
+          "Administrative Services Officer I",
+          "Accounting Assistant"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "Administrative Legal Clerk - Entry",
+          "kind": "exact",
+          "fit": "meets_published",
+          "requirements": [
+            "REQ met: 2 years of clerical experience",
+            "REQ met: equivalent to completion of 12th grade",
+            "pref unknown: may need a valid driver's license"
+          ]
+        },
+        {
+          "title": "Administrative Services Officer I",
+          "kind": "related",
+          "fit": "meets_published",
+          "requirements": [
+            "REQ met: Multiple qualifying paths: 1 yr supervisory experience, OR bachelor's degree in a related field, OR 1-2 yrs equivalent admin/fiscal experience in county/state service"
+          ]
+        },
+        {
+          "title": "Accounting Assistant",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Relevant college degree, or equivalent combination of education and experience, in accounting/bookkeeping"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/metrix"
+      ],
+      "transcript": [
+        "U: I want an office clerk job. I didn't finish high school.",
+        "A: I've noted you're aiming for an office clerk role and haven't finished high school. I'll look at how your education level affects which clerk job openings are a realistic fit. How many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. How many years of supervisory or management experience do you have? The Administrative Services Officer I listing asks for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for office work training and finishing a GED or diploma. Here is what they describe: Metrix Learning offers instant access to over 5,000 courses. [1] The sources do not describe any service for finishing a GED or diploma. I didn't find indexed information on finishing a GED or diploma. I also checked the 12 indexed job listings against yo",
+        "U: Actually I do have my GED now, and I have 3 years of clerical experience.",
+        "A: Thanks — I've updated that. Based on what you've shared, I searched the indexed sources for office work training. Here is what they describe: Metrix Learning offers instant access to over 5,000 courses covering Microsoft Office, Project Management, Leadership, Information Technology, Health and Safety, and Work Readiness. [1] I also checked the 12 indexed job listings against your role and the pub"
+      ],
+      "checks": [
+        {
+          "label": "before: Clerk in gap group with \"12th grade\" missing",
+          "ok": true,
+          "detail": "{\"best\":[],\"related\":[\"Administrative Services Officer I\",\"Accounting Assistant\"],\"gaps\":[\"Administrative Legal Clerk - Entry\"]}"
+        },
+        {
+          "label": "after: Clerk no longer in gap group (FOLLOW_UP)",
+          "ok": true,
+          "detail": "{\"best\":[\"Administrative Legal Clerk - Entry\"],\"related\":[\"Administrative Services Officer I\",\"Accounting Assistant\"],\"gaps\":[]}"
+        },
+        {
+          "label": "requirement /12th grade/ on /Legal Clerk/ is met",
+          "ok": true,
+          "detail": "got met"
+        },
+        {
+          "label": "requirement /clerical experience/ on /Legal Clerk/ is met",
+          "ok": true,
+          "detail": "got met"
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nOffice work\n✓\nEducation\nGED or diploma complete\n✓\nLooking as\nJob seeker\n✓\nRole wanted\nClerk / records & legal clerk\n✓\nExperience\nClerk / records & legal clerk\n✓\nExperience (years)\nadministrative & office: 3 years"
+        }
+      ]
+    },
+    {
+      "scenario": "8. Early results before answering",
+      "mode": "self",
+      "expected": "See Results immediately → one optional targeted question with \"Show results anyway\"; results label uncertain matches (badge \"not known yet\" / \"to confirm\"), nothing marked unmet that was not stated.",
+      "pass": true,
+      "questionsAsked": [
+        "Do you have a driver's license? The Electrician listing asks for it.",
+        "Before I show results — one detail would make them more accurate. How many years of skilled trades experience do you have? The Electrician listing asks for it.",
+        "Which county are you in? It decides which offices and providers are reachable."
+      ],
+      "questionIds": [
+        "qual:cert:drivers_license",
+        "qual:exp:skilled_trades",
+        "county"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | The trades | ✓ | Looking as | Job seeker",
+      "groups": {
+        "best": [],
+        "related": [
+          "Electrician"
+        ],
+        "gaps": []
+      },
+      "cards": [
+        {
+          "title": "Electrician",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: 5-yr accredited electrical apprenticeship OR 5 yrs full-time experience as an electrician",
+            "REQ unknown: valid CA Class C+ driver's license"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/event/skilled-trades-job-fair"
+      ],
+      "transcript": [
+        "U: I want to work in the trades.",
+        "A: You've shared that you're interested in working in the trades. I'll look for job postings in the trades that match your stated interest. Do you have a driver's license? The Electrician listing asks for it.",
+        "U: Show me the options you have so far",
+        "A: Before I show results — one detail would make them more accurate. How many years of skilled trades experience do you have? The Electrician listing asks for it.",
+        "U: Show results anyway",
+        "A: Based on what you've shared, I searched the indexed sources for the trades training. Here is what they describe: The Skilled Trades Job Fair offers learning about free training programs and certifications. [1] I also checked the 12 indexed job listings against your role and the published requirements: none is the exact role you described with no requirement gap, 1 is a related role. For 1 of the m"
+      ],
+      "checks": [
+        {
+          "label": "\"Show results anyway\" offered",
+          "ok": true
+        },
+        {
+          "label": "every card with unknown mandatory requirements is labelled as such in the UI",
+          "ok": true,
+          "detail": "RELATED JOB OPPORTUNITIES\n\nRelated roles, transferable skills or the same field — they may ask for more than you have shared.\n\nElectrician\n\nCounty of Sacramento - General Services Department\n\nSAME FIELD\nSkilled trades\nSacramento\n$107,949.60/yr\nWhy this fits\nA skilled trades role, the field you menti"
+        },
+        {
+          "label": "no requirement marked unmet without a stated fact",
+          "ok": true
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nThe trades\n✓\nLooking as\nJob seeker"
+        }
+      ]
+    },
+    {
+      "scenario": "9. Helper mode",
+      "mode": "helper",
+      "expected": "Third-person questions and context (\"they\"); panel shows \"Helping someone else\"; facts are about the person helped.",
+      "pass": true,
+      "questionsAsked": [
+        "What's the highest level of education they have completed? 2 of the matching listings ask for it.",
+        "Do they need income coming in soon, or is there room to train first?"
+      ],
+      "questionIds": [
+        "qual:edu",
+        "incomeUrgency"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Who this is for | Helping someone else | ✓ | Situation | Young adult (16–24) | ✓ | Career pathway | Office work | ✓ | Education | Needs GED / HiSET | ✓ | Age | 24 years old | ✓ | Looking as | Job seeker | ✓ | Experience | Clerk / records & legal clerk | ✓ | Experience (years) | administrative & office: 1 year",
+      "groups": {
+        "best": [],
+        "related": [
+          "Administrative Services Officer I",
+          "Accounting Assistant"
+        ],
+        "gaps": [
+          "Administrative Legal Clerk - Entry"
+        ]
+      },
+      "cards": [
+        {
+          "title": "Administrative Services Officer I",
+          "kind": "related",
+          "fit": "meets_published",
+          "requirements": [
+            "REQ met: Multiple qualifying paths: 1 yr supervisory experience, OR bachelor's degree in a related field, OR 1-2 yrs equivalent admin/fiscal experience in county/state service"
+          ]
+        },
+        {
+          "title": "Accounting Assistant",
+          "kind": "sector",
+          "fit": "incomplete",
+          "requirements": [
+            "REQ unknown: Relevant college degree, or equivalent combination of education and experience, in accounting/bookkeeping"
+          ]
+        },
+        {
+          "title": "Administrative Legal Clerk - Entry",
+          "kind": "exact",
+          "fit": "gaps",
+          "requirements": [
+            "REQ unmet: 2 years of clerical experience",
+            "REQ unmet: equivalent to completion of 12th grade",
+            "pref unknown: may need a valid driver's license"
+          ]
+        }
+      ],
+      "citations": [
+        "https://goldensierra.com/metrix",
+        "https://goldensierra.com/help-for-job-seekers"
+      ],
+      "transcript": [
+        "U: I'm helping a 24-year-old who wants an office job. He has 1 year of clerical experience.",
+        "A: I've noted that he's 24, interested in office work, and has a year of clerical experience. Next, I'll look for office listings whose published requirements align with his clerical background. What's the highest level of education they have completed? 2 of the matching listings ask for it.",
+        "U: They haven't completed a high school diploma or GED",
+        "A: I've noted that he hasn't completed high school or a GED. Next, I'll look into whether he needs income soon or has time, as that points toward different next steps. Do they need income coming in soon, or is there room to train first?",
+        "U: Show me the options you have so far",
+        "A: Based on what you've shared, I searched the indexed sources for office work training, finishing a GED or diploma and services for young adults. Here is what they describe: Metrix Learning offers access to over 5,000 courses, including Microsoft Office, project management, leadership, information technology, health and safety, and work readiness, which can support office work training. [1,2] For yo"
+      ],
+      "checks": [
+        {
+          "label": "questions in third person",
+          "ok": true,
+          "detail": "What's the highest level of education they have completed? 2 of the matching listings ask for it. || Do they need income coming in soon, or is there room to train first?"
+        },
+        {
+          "label": "panel shows \"Helping someone else\"",
+          "ok": true
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nWho this is for\nHelping someone else\n✓\nSituation\nYoung adult (16–24)\n✓\nCareer pathway\nOffice work\n✓\nEducation\nNeeds GED / HiSET\n✓\nAge\n24 years old\n✓\nLooking as\nJob seeker\n✓\nExperience\nClerk / records & legal clerk\n✓\nExperience (years)\nadministrative & office: 1 year"
+        }
+      ]
+    },
+    {
+      "scenario": "10. Self-service mode",
+      "mode": "self",
+      "expected": "Second-person questions (\"you\").",
+      "pass": true,
+      "questionsAsked": [
+        "What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "How many years of administrative & office experience do you have? 2 of the matching listings ask for it."
+      ],
+      "questionIds": [
+        "qual:edu",
+        "qual:exp:administrative"
+      ],
+      "panel": "WHAT I KNOW SO FAR | ✓ | Career pathway | Office work | ✓ | Education | Needs GED / HiSET | ✓ | Location & transport | Placerville, El Dorado County | ✓ | Looking as | Job seeker | ✓ | Experience | Administrative assistant | ✓ | Experience (years) | administrative & office: yes",
+      "groups": {
+        "best": [],
+        "related": [],
+        "gaps": []
+      },
+      "cards": [],
+      "citations": [],
+      "transcript": [
+        "U: I want to work as an administrative assistant in Placerville.",
+        "A: I've noted your interest in administrative assistant work in Placerville. I'll look for openings that match your experience and location. What's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "U: I haven't completed a high school diploma or GED",
+        "A: I've noted that you haven't completed a high school diploma or GED. How many years of administrative & office experience do you have? 2 of the matching listings ask for it."
+      ],
+      "checks": [
+        {
+          "label": "questions in second person",
+          "ok": true,
+          "detail": "What's the highest level of education you have completed? 3 of the matching listings ask for it. || How many years of administrative & office experience do you have? 2 of the matching listings ask for it."
+        },
+        {
+          "label": "cards verified against PostgreSQL + Qdrant",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "citations map to indexed chunks",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no question asked twice",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "no eligibility / \"currently open\" claims",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "label": "final results reached with \"What I know so far\" populated",
+          "ok": true,
+          "detail": "WHAT I KNOW SO FAR\n✓\nCareer pathway\nOffice work\n✓\nEducation\nNeeds GED / HiSET\n✓\nLocation & transport\nPlacerville, El Dorado County\n✓\nLooking as\nJob seeker\n✓\nExperience\nAdministrative assistant\n✓\nExperience (years)\nadministrative & office: yes"
+        }
+      ]
+    }
+  ]
+}
