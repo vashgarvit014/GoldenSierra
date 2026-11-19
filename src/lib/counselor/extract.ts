@@ -1,3 +1,4 @@
+import { pronounIn } from '../conversation/voice';
 import { z } from 'zod';
 import { getLlmClient } from '../ai/client';
 import { env, hasLlm } from '../env';
@@ -64,7 +65,12 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
   const lower = text.toLowerCase();
 
   // ── Who the conversation is about ── (asking on someone else's behalf → "they", never "you")
+  const helping = () => (out.mode ?? ctx.mode) === 'helper';
   if (/\b(i'?m|i am|we'?re|we are)\s+(helping|assisting|supporting|working with|asking (for|on behalf of))\b|\bon behalf of\b|\bmy (client|son|daughter|nephew|niece|brother|sister|friend|student|mentee)\b/i.test(text)) out.mode = 'helper';
+  if (helping() && !ctx.pronoun) {
+    const p = pronounIn(text);
+    if (p) out.pronoun = p;
+  }
 
   // ── Age ──
   const ageMatch =
@@ -153,15 +159,30 @@ export function ruleExtract(message: string, ctx: CounselorContext): ContextUpda
   else if (/\boffice|admin|clerical|bookkeep|receptionist/i.test(text)) out.careerInterest = 'office work';
   else if (/\bit\b|tech|software|cyber|comput/i.test(text)) out.careerInterest = 'technology';
   else if (occupation?.[1]) out.careerInterest = cleanInterest(occupation[1]);
+  else {
+    // "looking for warehouse work", "need a retail job": the kind of work named before "work"/"job".
+    const kind = /\b(?:looking for|need|needs|want|wants|find|searching for)\s+(?:a |an |some )?([a-z-]+(?:\s[a-z-]+)?)\s+(?:work|job|jobs|position)\b/i.exec(text)?.[1];
+    if (kind && !/^(new|better|different|another|any|full-time|part-time|good|steady|paying|real|some|more|a|the)(\s|$)/i.test(kind)) out.careerInterest = cleanInterest(kind);
+  }
+
+  if (/\b(?:need|needs|looking for|find|get|want|wants|searching for)\s+(?:a |an |some )?(?:[\w-]+\s+){0,2}(?:job|work)\b/i.test(text) && !/\btrain(?:ing)?\b/i.test(text)) out.jobGoalStated = true;
 
   // ── Roles: what they have done vs what they want (occupation taxonomy; vocabulary, not facts) ──
   const roleHits = classify(text, 2).map((h) => h.key).slice(0, 2);
   if (roleHits.length) {
-    const did = /\b(worked|work(?:ing)? as|experience|background|used to|years (?:as|in|of)|(?:spent|for|over) (?:\d+|a few|several|one|two|three|four|five|six|seven|eight|nine|ten|many) years|helped|took care of|cared for|supervised|led|operated|installed|repaired|taught|cooked|cleaned|drove|built|fixed|sold|i did|did (?:the )?\w+ing|handled|ran|managed|i was an?|she was an?|he was an?|previously|have been an?|i'?ve been an?|currently an?)\b/i.test(text);
+    // "I want to work as an electrician" is a goal, not experience: test the past-work cues without it.
+    const GOAL = /\b(?:want|wants|would like|'d like|hoping|hope|hopes|plan(?:ning)?|planning|aim(?:ing)?|trying|like)\s+to\s+(?:work|start working|be|become|get a job)\b[^.?!]*/gi;
+    const pastText = text.replace(GOAL, '');
+    const goalHits = classify((text.match(GOAL) ?? []).join('. '), 2).map((h) => h.key).slice(0, 2);
+    const pastHits = classify(pastText, 2).map((h) => h.key).slice(0, 2);
+    const did = /\b(worked|work(?:ing)? as|experience|background|used to|years (?:as|in|of)|(?:spent|for|over) (?:\d+|a few|several|one|two|three|four|five|six|seven|eight|nine|ten|many) years|helped|took care of|cared for|supervised|led|operated|installed|repaired|taught|cooked|cleaned|drove|built|fixed|sold|i did|did (?:the )?\w+ing|handled|ran|managed|i was an?|she was an?|he was an?|previously|have been an?|i'?ve been an?|currently an?)\b/i.test(pastText);
     const wants = /\b(want|wants|interested|looking for|become|aiming|hoping|would like|get into)\b/i.test(text);
-    if (did) out.experience = roleHits;
+    // A role named in a goal is a target; one named alongside past-work cues is experience. "I want to be
+    // an electrician. I have 1 year of experience" is both: the experience is in the role they named.
+    if (goalHits.length) out.occupations = goalHits;
+    if (did) out.experience = pastHits.length ? pastHits : goalHits.length ? goalHits : roleHits;
     // "Experience installing solar panels, wants a better job" names a past role, not a new target.
-    if (wants && !did) out.occupations = roleHits;
+    if (wants && !did && !goalHits.length) out.occupations = roleHits;
   }
   // ── Qualifications: degrees, certifications/licenses, years of experience (only when stated) ──
   const pastSectors = [...new Set((out.experience ?? []).map((k) => OCCUPATION_BY_KEY.get(k)!.sector))];

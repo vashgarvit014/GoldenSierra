@@ -71,7 +71,11 @@ export const POST = withErrorHandling(async (request: Request) => {
   const { flow: storedFlow, ...profile } = storedProfile as UserProfile & { flow?: unknown };
   const stored = readFlow(storedFlow);
   // The explicit choice wins over inference; it is fixed for the conversation once made.
-  const flow = body.mode && stored.stage === 'START' ? { ...stored, context: { ...stored.context, mode: body.mode } } : stored;
+  // Choosing a mode means someone looking for work (an employer who says so overrides it), so the
+  // "looking for work or hiring?" question is never asked after the mode screen.
+  const flow = body.mode && stored.stage === 'START'
+    ? { ...stored, context: { ...stored.context, mode: body.mode, audience: stored.context.audience ?? ('job_seeker' as const) } }
+    : stored;
 
   const started = Date.now();
   await appendUserMessage(session.id, message);

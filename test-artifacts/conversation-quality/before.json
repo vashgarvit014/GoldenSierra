@@ -1,0 +1,1106 @@
+[
+  {
+    "ui": "public",
+    "scenario": 1,
+    "name": "Unknown starting point (self)",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "It's completely normal to feel that way — most people do when they first reach out, and it doesn't mean you're behind. Knowing which side of the table you're on changes everything about where I can steer you, so let's just get that settled first. Quick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 66 words",
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: completely normal",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 2,
+    "name": "Unknown starting point (helper)",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "That makes sense — starting a job search can feel overwhelming, especially when there are so many different directions to go. Where they're located matters quite a bit here, since it shapes which local offices and providers are realistically reachable for them. So, if you don't mind me asking — which county are they in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: if you don'?t mind me asking"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 3,
+    "name": "Job search",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need a job.",
+        "bot": "That's a clear place to start, and getting you back to work is exactly what we're here for. One of the first things that shapes how I can help is where you're located, since the offices and providers available to you depend on your county. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Placer County",
+        "bot": "Placer County — that helps me zero in on the local options and the network we work with there. Since you're unemployed, the next useful step is figuring out what direction actually fits you, so we're not just throwing anything at the wall. What kind of work are you aiming for? Even a rough direction helps.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 4,
+    "name": "Healthcare careers",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'd like to work in healthcare, maybe as a caregiver.",
+        "bot": "Healthcare and caregiving is a meaningful direction — it's a field where the right fit matters a lot, both for you and for the people you would support, and it opens up different paths depending on what you're trying to get done. Quick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 63 words",
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 5,
+    "name": "Green-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm interested in solar or other green energy jobs.",
+        "bot": "It's great to hear you're thinking about solar and other green energy jobs—that's a field with a lot of momentum right now. One thing I need to know is your county, because our offices and the training providers we work with are organized by county, and that determines what's actually reachable for you. So, which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 unsourced workforce claim",
+      "T1 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 6,
+    "name": "White-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want an office job, something like an administrative assistant.",
+        "bot": "You're looking for office work, and administrative assistant roles are a solid entry point — they're widely available across employers, and they tend to lead to other office career paths. The catch is that the offices, staffing agencies, and employer connections you can tap into depend on where you live, since the agency serves three different counties with somewhat different local labor markets.\n\nWhich county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 68 words",
+      "T1 unsourced workforce claim"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 7,
+    "name": "Education requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to become an accounting assistant.",
+        "bot": "An accounting assistant — that's a solid, practical direction with steady demand across Placer, El Dorado, and Alpine. It tells me you're after detail-oriented, consistent work, and the right path for you depends on what exactly you're trying to do. So a quick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a high school diploma.",
+        "bot": "A high school diploma is a great foundation — it opens up most entry-level accounting assistant roles and gives you flexibility. But where you're located really matters for which offices and training providers we can tap into. So, which county are you in — Placer, El Dorado, or Alpine?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 63 words",
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 unsourced workforce claim",
+      "T1 filler: quick check so i point you",
+      "T2 unsourced workforce claim"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 8,
+    "name": "Certification requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to work as an electrician.",
+        "bot": "You've got real hands-on experience as an electrician, and that's a strong foundation for finding work in the trades. Knowing where you're located helps me point you toward the right local resources and employers. Which county are you in? That determines which offices and providers we can connect you with.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I don't have an electrician license.",
+        "bot": "You've got solid electrician experience, but without a license, the path forward shifts—training or certification might come first. That makes the timing of your next step key. Do you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 9,
+    "name": "Previous experience",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I worked 5 years in retail as a cashier. What can I do next?",
+        "bot": "That's a solid five years of retail and customer service experience. To point you toward the right options, I want to check one quick thing: are you looking for work yourself, or are you hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 10,
+    "name": "Income urgency",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need money fast, I'm behind on rent.",
+        "bot": "Being behind on rent is tough — that kind of pressure makes everything feel more urgent. When money is needed right away, the quickest help tends to come from your local resources, and those are set up by county. Which county are you in — Placer, El Dorado, or Alpine? That tells me which offices and providers are within reach for you.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 62 words"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 11,
+    "name": "Location constraints",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I live in Auburn and don't have a car. I'm looking for warehouse work.",
+        "bot": "Auburn without a car adds real friction to a warehouse job search, since so many of those shifts are spread across industrial zones. The good news is warehouse work also opens up training pathways that could broaden what you can reach—but timing matters a lot for how we approach that. Do you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 64 words",
+      "T1 unsourced workforce claim"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 12,
+    "name": "Helping someone",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "My son is 19 and wants to start working.",
+        "bot": "That's wonderful that your son is ready to get started at 19. Where they're located really shapes which offices and providers they can reach, since we cover three counties. Which county are they in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "He finished high school.",
+        "bot": "It's great that he completed high school—that gives him a solid foundation and more flexibility in what he can do next. It also means we can consider both immediate work and further training, depending on his situation. So, do they need income coming in soon, or is there room for them to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b",
+      "T2 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 13,
+    "name": "Looking for myself → final recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm looking for a clerk job in Placer County.",
+        "bot": "A clerk role in Placer County is a solid target — there's steady demand for that kind of work across the county, and the path in can look different depending on where you're starting from. That timing piece really shapes which direction makes sense for you, so it's good to get it on the table. Do you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a GED and 3 years of clerical experience.",
+        "bot": "That's a solid base — a GED plus three years of clerical experience gives you real footing for clerk roles in Placer County. It often means you can jump into positions that want someone ready to handle the day-to-day without a lot of retraining. And are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "(no results control offered)",
+        "quickReplies": [],
+        "citations": 0,
+        "kind": "none"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 69 words",
+      "T1 unsourced workforce claim",
+      "T2 filler: ^(that'?s|it'?s) (a |so )?(solid|great|wonderful|meaningful|good|clear|strong|tough)\\b"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 14,
+    "name": "Correction",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm in El Dorado County, looking for admin work.",
+        "bot": "Admin work in El Dorado County — that's a solid fit, since there are a lot of small offices, medical practices, and county offices in the area that need front-desk and clerical help. The main thing that shapes your path is timing: if you need a paycheck fast, we'd look at roles you can step into quickly, but if you can invest a little time, training can open up broader options. So let me ask — do you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Sorry, I meant Placer County, not El Dorado.",
+        "bot": "Got it — Placer County, not El Dorado. That changes things a bit, since Placer has more corporate and tech-adjacent office environments, especially around Roseville and Rocklin, which can offer different kinds of admin roles than the county government or medical offices you'd find in El Dorado. So the right starting point depends on your current situation. And are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 90 words",
+      "T2 clarification is 64 words",
+      "T2 unsourced workforce claim"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 15,
+    "name": "Follow-up question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What is the Elevate program?",
+        "bot": "The Elevate program is a scholarship program designed to encourage job training and employment among people who are either English language learners or low-income individuals. [1] It offers up to $1,000 when you complete job training in four semesters or less, and up to another $1,000 when you obtain training-related employment. [1] The program is provided in partnership with Sierra College and includes over 20 career pathways, such as Business, Accounting, Cybersecurity, Mechatronics, Information Technology, Allied Health, and Construction. [1] The scholarship is only available to English language learners or low-income individuals. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "results"
+      },
+      {
+        "user": "Who can apply for it?",
+        "bot": "The scholarship is only available to individuals who are either English language learners or low-income individuals. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 16,
+    "name": "Early recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want caregiver work.",
+        "bot": "Caregiver work is a meaningful path—it's one of the most in-demand roles in this region, and there are real needs across all three counties. The county you're in matters a lot here, since it shapes which local offices and provider networks you can tap into for that kind of position. Let's start there. Which county are you in? That determines which offices and providers are reachable for you.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "(no results control offered)",
+        "quickReplies": [],
+        "citations": 0,
+        "kind": "none"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 68 words",
+      "T1 unsourced workforce claim"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 17,
+    "name": "Direct factual query",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What services does Golden Sierra offer to employers?",
+        "bot": "Golden Sierra offers employers recruitment assistance, hiring incentives, and employee training. [1] It also provides a professional facility with comfortable rooms and flexible scheduling for screening and interviewing job candidates. [1,2] Additionally, it offers hiring assistance, financial incentives, and employee training to small businesses. [3]",
+        "quickReplies": [],
+        "citations": 3,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 18,
+    "name": "Unsupported question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "Can you help me file my taxes?",
+        "bot": "Quick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 19,
+    "name": "Missing qualifications",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to be an electrician. I have 1 year of experience and no license.",
+        "bot": "Electrician work with a year of hands-on experience under your belt — that's a solid start. Without a license yet, the practical step is usually getting into the field where you can build toward that credential, so it helps to know which side of the table you're on.\n\nQuick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 69 words",
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "public",
+    "scenario": 20,
+    "name": "Related-role matching",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "She worked as a cashier for 4 years and wants an office job.",
+        "bot": "She's got four solid years of cashier experience and is ready to shift into an office role — that's a move that can definitely build on the customer service skills she already has. The practical side of this is that the offices, providers, and resources we can connect her with depend on where she lives, since the three counties we serve each have their own network. Which county are they in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 clarification is 71 words"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 1,
+    "name": "Unknown starting point (self)",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "It sounds like you're uncertain about the first step. I'll focus on understanding your role in the job market before moving forward.\n\nQuick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^it sounds like",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 2,
+    "name": "Unknown starting point (helper)",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "It sounds like they're not sure where to start. I'll focus on identifying what options exist in their area to help guide their next step.\n\nWhich county are they in? It decides which offices and providers are reachable.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^it sounds like"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 3,
+    "name": "Job search",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need a job.",
+        "bot": "I hear that you're currently looking for work. I'll begin by understanding your location to find suitable support.\n\nWhich county are you in? It decides which offices and providers are reachable.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Placer County",
+        "bot": "Thanks, I've noted that you're in Placer County. Next, I'll be looking for available training and job programs in that area.\n\nWhat kind of work are you aiming for? Even a rough direction helps.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T2 filler: \\bnext,? i'll\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 4,
+    "name": "Healthcare careers",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'd like to work in healthcare, maybe as a caregiver.",
+        "bot": "I've noted your interest in healthcare and caregiving work. I'll look for local skill-building opportunities that match this path.\n\nWhich county are you in? It decides which offices and providers are reachable.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 5,
+    "name": "Green-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm interested in solar or other green energy jobs.",
+        "bot": "I've noted your interest in solar and other green energy jobs.\n\nQuick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 6,
+    "name": "White-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want an office job, something like an administrative assistant.",
+        "bot": "Got it — you're looking for office work as an administrative assistant. Next I'll look at job requirements tied to that role to see which listings are a real fit.\n\nWhat's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: \\bnext,? i'll\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 7,
+    "name": "Education requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to become an accounting assistant.",
+        "bot": "I've noted your interest in becoming an accounting assistant and bookkeeper. I'll look for published job requirements that match this role to see which listings are a real fit.\n\nWhat's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a high school diploma.",
+        "bot": "Got it. Published job requirements depend on this, so it changes which listings are a real fit.\n\nHow many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "quickReplies": [
+          "None yet",
+          "Under 2 years",
+          "2–4 years",
+          "5+ years"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)",
+      "T2 filler: ^got it[,!.—-]"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 8,
+    "name": "Certification requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to work as an electrician.",
+        "bot": "Thanks for sharing your interest in working as an electrician. I'll look for posted job requirements that align with your electrician experience.\n\nDo you have a driver's license? 2 of the matching listings ask for it.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I don't have an electrician license.",
+        "bot": "I've noted that you don't currently hold an electrician license. I'll look for posted job requirements that don't mandate an electrician license, so we can see which listings remain a realistic fit.\n\nWhat's the highest level of education you have completed? The Traffic Control & Lighting Technician I/II listing asks for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^thanks for (letting me know|sharing)",
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T2 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T2 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 9,
+    "name": "Previous experience",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I worked 5 years in retail as a cashier. What can I do next?",
+        "bot": "Thanks for sharing your five years in retail as a cashier. I'll look for roles that align with that customer service and sales experience.\n\nDo you have a state sales license? The Sales Manager listing asks for it.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^thanks for (letting me know|sharing)",
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 10,
+    "name": "Income urgency",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need money fast, I'm behind on rent.",
+        "bot": "I understand you need income soon and are behind on rent. Next, I'll look at what options exist for quickly connecting with work opportunities.\n\nQuick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: ^i understand\\b",
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: \\bnext,? i'll\\b",
+      "T1 filler: quick check so i point you"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 11,
+    "name": "Location constraints",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I live in Auburn and don't have a car. I'm looking for warehouse work.",
+        "bot": "I've noted that you're in Auburn without a car and are seeking warehouse work. I'll look at how urgently you need income and how much time you have for training, since that points toward the most useful next step.\n\nDo you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 12,
+    "name": "Helping someone",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "My son is 19 and wants to start working.",
+        "bot": "I've noted your son is 19, currently unemployed, and eager to start working. Given that offices and providers differ by area\n\nWhich county are they in? It decides which offices and providers are reachable.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "He finished high school.",
+        "bot": "I've noted that your son completed high school. Next, I'll look for local entry-level support and training tailored to his education level.\n\nWhat kind of work are they aiming for? Even a rough direction helps.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)",
+      "T2 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T2 filler: \\bnext,? i'll\\b",
+      "T2 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 13,
+    "name": "Looking for myself → final recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm looking for a clerk job in Placer County.",
+        "bot": "I've noted you're targeting a clerk role in Placer County. Next I'll focus on listings that match this role and area to see which are truly a fit.\n\nWhat's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a GED and 3 years of clerical experience.",
+        "bot": "You've updated me on your completed GED and three years of clerical experience. I'll focus on positions that match your background while keeping your income needs and available time in view.\n\nDo you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Based on what you've shared, I searched the indexed sources for office work training and services in or near Placer County. Here is what they describe:\n\nMetrix Learning offers access to over 5,000 courses, including Microsoft Office and Project Management, which supports office work training. [1,2,3] For services in or near Placer County, the sources list no-cost services available to residents of Placer, El Dorado, or Alpine counties: Training Scholarships, Career Counseling, and Financial Assistance. [2]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described, 2 are related roles (1 more matched, but their deadlines have passed). For 1 of the matches, some published requirements couldn't be checked against what you shared — each card shows which. They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: whether there is a college degree, transport, whether income is needed right away and current work status.",
+        "quickReplies": [],
+        "citations": 3,
+        "kind": "SHOWING_RESULTS"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: \\bnext,? i'll\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)",
+      "T2 filler: \\bI'll (look|search|focus|begin)\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 14,
+    "name": "Correction",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm in El Dorado County, looking for admin work.",
+        "bot": "I've noted you're in El Dorado County and interested in office/admin work. I'll focus on published admin job requirements in your area to see what's a real fit.\n\nWhat's the highest level of education you have completed? 3 of the matching listings ask for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Sorry, I meant Placer County, not El Dorado.",
+        "bot": "Thanks, I've updated your county to Placer. I'll look for published admin job requirements in Placer County to see what fits your background.\n\nHow many years of administrative & office experience do you have? 2 of the matching listings ask for it.",
+        "quickReplies": [
+          "None yet",
+          "Under 2 years",
+          "2–4 years",
+          "5+ years"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)",
+      "T2 filler: \\bI'll (look|search|focus|begin)\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 15,
+    "name": "Follow-up question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What is the Elevate program?",
+        "bot": "The Elevate program is a scholarship program designed to encourage job training and employment among people who are either English language learners or low-income individuals. [1] It offers up to $1,000 when you complete job training in four semesters or less and up to another $1,000 when you obtain training-related employment. [1] The program is partnered with Sierra College and offers over 20 career pathways, including business, accounting, cybersecurity, mechatronics, information technology, allied health, and construction. [1] It is only available to English language learners or low-income individuals. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "START"
+      },
+      {
+        "user": "Who can apply for it?",
+        "bot": "The Elevate program is available only to individuals who are either English language learners or low-income individuals. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "START"
+      }
+    ],
+    "issues": [
+      "T2 repeats the opening \"the elevate program is\""
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 16,
+    "name": "Early recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want caregiver work.",
+        "bot": "Got it. Offices and providers differ by location.\n\nWhich county are you in? It decides which offices and providers are reachable.",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Based on what you've shared, I searched the indexed sources for healthcare training. Here is what they describe:\n\nSutter Health, Center of Excellence in Pharma, and UCDavis Health are part of the Job Connections hybrid event, which is described as a free, monthly event designed to help job seekers learn about local employment opportunities, with presentations starting at 2:00pm and requiring professional dress. [1] Sierra College, offered through Elevate Your Future, provides job training to help you prepare for good jobs in target industry sectors, with over 20 career pathways including Allied Health, Cybersecurity, Mechatronics, Information Technology, Business, Accounting, and Construction. [2]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described (1 more matched, but their deadlines have passed). They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: which county, diploma or GED status and whether income is needed right away. Do you need income coming in soon, or is there room to train first?",
+        "quickReplies": [
+          "Needs income now",
+          "Can train first",
+          "Open to both"
+        ],
+        "citations": 2,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^got it[,!.—-]",
+      "T2 clarification is 185 words"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 17,
+    "name": "Direct factual query",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What services does Golden Sierra offer to employers?",
+        "bot": "Golden Sierra offers employers recruitment assistance, hiring assistance, hiring incentives, financial incentives, and employee training. [1,2] They also provide a professional facility with comfortable rooms and flexible scheduling for screening and interviewing job candidates. [1,3]",
+        "quickReplies": [],
+        "citations": 3,
+        "kind": "START"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 18,
+    "name": "Unsupported question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "Can you help me file my taxes?",
+        "bot": "I see you're asking about help with filing your taxes.\n\nQuick check so I point you the right way — are you looking for work yourself, or hiring for a business?",
+        "quickReplies": [
+          "Looking for work",
+          "I'm an employer"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 asks \"work or hiring?\" after the mode was chosen",
+      "T1 filler: quick check so i point you",
+      "T1 filler: \\bI see you're asking\\b"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 19,
+    "name": "Missing qualifications",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to be an electrician. I have 1 year of experience and no license.",
+        "bot": "I've noted your goal to work as an electrician, along with your one year of experience and lack of a license. I'll now look at what the published job listings specify so we can see how your background lines up with those requirements.\n\nDo you have a driver's license? 2 of the matching listings ask for it.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  },
+  {
+    "ui": "admin",
+    "scenario": 20,
+    "name": "Related-role matching",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "She worked as a cashier for 4 years and wants an office job.",
+        "bot": "I've updated her profile with her four years of cashier/customer service experience and her interest in office work. Next, I'll focus on office roles where her customer service background is relevant.\n\nWhat's the highest level of education they have completed? 3 of the matching listings ask for it.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": [
+      "T1 filler: \\bI'll (look|search|focus|begin)\\b",
+      "T1 filler: \\bnext,? i'll\\b",
+      "T1 filler: ^i('ve| have) (noted|updated (her|his|their) profile)"
+    ]
+  }
+]

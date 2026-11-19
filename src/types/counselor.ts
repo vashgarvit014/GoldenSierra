@@ -87,6 +87,10 @@ export type CounselorContext = {
   quals?: Record<string, QualFact>;
   /** Education or training in progress ("working on her GED", "in a CNA course"). */
   currentTraining?: string;
+  /** Helper mode: how the user refers to the person they are helping, so questions agree ("Is she…"). */
+  pronoun?: 'she' | 'he';
+  /** They said they are looking for a job ("I need a job", "looking for warehouse work"): the job-or-training question is settled. */
+  jobGoalStated?: boolean;
 };
 
 export type QualFact = {

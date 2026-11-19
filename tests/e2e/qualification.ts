@@ -117,7 +117,7 @@ async function verifyRequirements(jobs: JobMatch[]): Promise<{ ok: boolean; why:
     await g('I have experience installing solar panels and want a better job.');
     const g2 = await g('Show me the options you have so far', true);
     const anyway = g2.payload.flow?.quickReplies.find((q) => /show results anyway/i.test(q.label));
-    check('7: See Results with a requirement-deciding gap → one targeted question + "Show results anyway"', /^Before I show results/.test(g2.answer) && !!anyway && (g2.payload.flow?.quickReplies.length ?? 0) <= 4, JSON.stringify(g2.payload.flow));
+    check('7: See Results with a requirement-deciding gap → one targeted question + "Show results anyway"', /^One detail would make the results more accurate/.test(g2.answer) && !!anyway && (g2.payload.flow?.quickReplies.length ?? 0) <= 4, JSON.stringify(g2.payload.flow));
     const g3 = await g('Show results anyway');
     const solarJobs = all(g3);
     check('7: "Show results anyway" → results; unknown requirements stay unknown and are named', g3.payload.flow?.stage === 'SHOWING_RESULTS' && solarJobs.length > 0 && solarJobs.every((j) => j.requirements.every((r) => r.status !== 'unmet')) && (g3.payload.flow?.uncertainties.length ?? 0) > 0, JSON.stringify(g3.payload.flow?.uncertainties));

@@ -1,0 +1,1009 @@
+[
+  {
+    "ui": "public",
+    "scenario": 1,
+    "name": "Unknown starting point (self)",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "Are you mainly looking for a job, training, or both?",
+        "quickReplies": [
+          "Find a job",
+          "Explore training",
+          "Both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 2,
+    "name": "Unknown starting point (helper)",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "What kind of help does the person you’re supporting need right now?",
+        "quickReplies": [
+          "Finding work",
+          "Career training",
+          "Not sure yet"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 3,
+    "name": "Job search",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need a job.",
+        "bot": "Finding the right job starts with what matters to you. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Placer County",
+        "bot": "Placer County gives us a good area to focus your search. What kind of work are you hoping to find? A rough idea is fine.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 4,
+    "name": "Healthcare careers",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'd like to work in healthcare, maybe as a caregiver.",
+        "bot": "Caregiving gives you a clear, hands-on entrance into healthcare. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 5,
+    "name": "Green-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm interested in solar or other green energy jobs.",
+        "bot": "Green energy gives us a clear direction to focus on. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 6,
+    "name": "White-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want an office job, something like an administrative assistant.",
+        "bot": "Administrative assistant gives us a specific office role to aim for. What's the highest level of education you have completed? The Administrative Legal Clerk - Entry listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 7,
+    "name": "Education requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to become an accounting assistant.",
+        "bot": "Accounting assistant — a clear, concrete target we can work from. What's the highest level of education you have completed? The Accounting Assistant listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a high school diploma.",
+        "bot": "Diploma noted — that settles the education piece for the accounting route. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 8,
+    "name": "Certification requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to work as an electrician.",
+        "bot": "Electrician it is — that gives us a direction. Do you have a driver's license? The Electrician listing asks for this.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I don't have an electrician license.",
+        "bot": "No electrician license — I've updated that for our planning. How many years of skilled trades experience do you have? The Electrician listing asks for this.",
+        "quickReplies": [
+          "None yet",
+          "Under 2 years",
+          "2–4 years",
+          "5+ years"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 9,
+    "name": "Previous experience",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I worked 5 years in retail as a cashier. What can I do next?",
+        "bot": "Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 10,
+    "name": "Income urgency",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need money fast, I'm behind on rent.",
+        "bot": "Being behind on rent makes finding money fast the priority. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 11,
+    "name": "Location constraints",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I live in Auburn and don't have a car. I'm looking for warehouse work.",
+        "bot": "No car means warehouse work needs to be near home in Auburn. Have you finished high school or a GED?",
+        "quickReplies": [
+          "GED / diploma done",
+          "Still working on it",
+          "Not started",
+          "Some college"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 12,
+    "name": "Helping someone",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "My son is 19 and wants to start working.",
+        "bot": "He's 19, unemployed, and ready to work — that's a clear place to start. Which county is he in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "He finished high school.",
+        "bot": "What kind of work is he hoping to find? A rough idea is fine.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 13,
+    "name": "Looking for myself → final recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm looking for a clerk job in Placer County.",
+        "bot": "Records and legal clerk in Placer County gives us a clear target to aim for. What's the highest level of education you have completed? The Administrative Legal Clerk - Entry listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a GED and 3 years of clerical experience.",
+        "bot": "Thanks, I've updated that. Would you like to stay in roles like this one, or also consider a lead or supervisory role?",
+        "quickReplies": [
+          "Same kind of role",
+          "Supervisory roles",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Here's what the indexed sources say about office work training and services in or near Placer County:\n\nMetrix Learning offers instant access to over 5,000 courses, including Microsoft Office, Project Management, Leadership, and Information Technology, which cover office work training. [1,2,3] Training Scholarships are a no-cost service available to Placer county residents for education and training. [2] On-the-job training is provided by Golden Sierra to job seekers in Placer, El Dorado, and Alpine counties. [3] Job search assistance is also provided by Golden Sierra to those looking for work in these counties. [3]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described, 2 are related roles (1 more matched, but their deadlines have passed). For 1 of the matches, some published requirements couldn't be checked against what you shared — each card shows which. They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: whether there is a college degree, transport and current work status. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 3,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 14,
+    "name": "Correction",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm in El Dorado County, looking for admin work.",
+        "bot": "El Dorado County and office work give us a clear direction. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Sorry, I meant Placer County, not El Dorado.",
+        "bot": "Placer County it is — I've made that switch. Have you finished high school or a GED?",
+        "quickReplies": [
+          "GED / diploma done",
+          "Still working on it",
+          "Not started",
+          "Some college"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 15,
+    "name": "Follow-up question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What is the Elevate program?",
+        "bot": "The Elevate program is a scholarship program designed to encourage job training and employment among English language learners or low-income individuals. [1] It offers up to $1,000 when you complete job training in four semesters or less, and up to another $1,000 when you obtain training-related employment. [1] The program is only available to individuals who are either English language learners or low-income individuals. [1] It is offered in partnership with Sierra College and includes over 20 career pathways in areas such as business, accounting, cybersecurity, mechatronics, information technology, allied health, and construction. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "results"
+      },
+      {
+        "user": "Who can apply for it?",
+        "bot": "Only individuals who are either English language learners or low-income individuals can apply for the Elevate program. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 16,
+    "name": "Early recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want caregiver work.",
+        "bot": "Caregiving is a clear direction to begin with. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Here's what the indexed sources say about healthcare training:\n\nElevate Your Future – Available Job Training, offered through Regional Equity and Recovery Partnerships in partnership with Sierra College, provides over 20 career pathways including Allied Health to prepare participants for jobs in target industry sectors. [1] Job Connections is a free monthly hybrid event where job seekers can gain insights on how to pursue a career in healthcare and learn about local employment opportunities with Sutter Health, UC Davis Health, and the Center of Excellence in Pharma. [2]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described (1 more matched, but their deadlines have passed). They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: which county, diploma or GED status and current work status. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 2,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 17,
+    "name": "Direct factual query",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What services does Golden Sierra offer to employers?",
+        "bot": "Golden Sierra offers employers recruitment assistance, hiring incentives, and employee training. [1] The agency can post job openings to a large pool of potential candidates, and provides resume screening and pre-employment testing to help find the most qualified workers. [2,3] Golden Sierra also offers the use of its professional facility to screen and interview job candidates, with comfortable rooms and flexible scheduling for a private space to meet and assess applicants. [2] Additionally, the agency provides hiring assistance, financial incentives, and employee training to small businesses. [3]",
+        "quickReplies": [],
+        "citations": 3,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 18,
+    "name": "Unsupported question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "Can you help me file my taxes?",
+        "bot": "I couldn't find enough information about that in the currently indexed knowledge base. I can help with finding work, exploring training, and job-search support — what would help you most?",
+        "quickReplies": [
+          "Find a job",
+          "Explore training",
+          "Both"
+        ],
+        "citations": 0,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 19,
+    "name": "Missing qualifications",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to be an electrician. I have 1 year of experience and no license.",
+        "bot": "One year of hands-on work is a real foundation to work from. Do you have a driver's license? The Electrician listing asks for this.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "public",
+    "scenario": 20,
+    "name": "Related-role matching",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "She worked as a cashier for 4 years and wants an office job.",
+        "bot": "Which county is she in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 1,
+    "name": "Unknown starting point (self)",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "Are you mainly looking for a job, training, or both?",
+        "quickReplies": [
+          "Find a job",
+          "Explore training",
+          "Both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 2,
+    "name": "Unknown starting point (helper)",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "I'm not sure where to start.",
+        "bot": "What kind of help does the person you’re supporting need right now?",
+        "quickReplies": [
+          "Finding work",
+          "Career training",
+          "Not sure yet"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 3,
+    "name": "Job search",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need a job.",
+        "bot": "Being unemployed means we can move quickly on your search. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Placer County",
+        "bot": "What kind of work are you hoping to find? A rough idea is fine.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 4,
+    "name": "Healthcare careers",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'd like to work in healthcare, maybe as a caregiver.",
+        "bot": "Caregiving in healthcare gives us a clear focus. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 5,
+    "name": "Green-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm interested in solar or other green energy jobs.",
+        "bot": "Solar and green energy give us a clear direction for your job search. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 6,
+    "name": "White-collar jobs",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want an office job, something like an administrative assistant.",
+        "bot": "Office work and administrative assistant — that gives us a clear target. What's the highest level of education you have completed? The Administrative Legal Clerk - Entry listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 7,
+    "name": "Education requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to become an accounting assistant.",
+        "bot": "Accounting assistant is a focused goal — that gives us a clear direction to work from. What's the highest level of education you have completed? The Accounting Assistant listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a high school diploma.",
+        "bot": "With your diploma in hand, the schooling box is checked. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 8,
+    "name": "Certification requirements",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to work as an electrician.",
+        "bot": "So the electrician route gives us a concrete target to work from. Do you have a driver's license? The Electrician listing asks for this.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I don't have an electrician license.",
+        "bot": "How many years of skilled trades experience do you have? The Electrician listing asks for this.",
+        "quickReplies": [
+          "None yet",
+          "Under 2 years",
+          "2–4 years",
+          "5+ years"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 9,
+    "name": "Previous experience",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I worked 5 years in retail as a cashier. What can I do next?",
+        "bot": "Five years as a cashier gives us real customer-facing experience to work with. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 10,
+    "name": "Income urgency",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I need money fast, I'm behind on rent.",
+        "bot": "Being behind on rent means speed is the priority. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 11,
+    "name": "Location constraints",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I live in Auburn and don't have a car. I'm looking for warehouse work.",
+        "bot": "Without a car, the warehouse search needs to stay close to home. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 12,
+    "name": "Helping someone",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "My son is 19 and wants to start working.",
+        "bot": "Being 19 and ready to work gives us a clear starting point. Which county is he in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "He finished high school.",
+        "bot": "Having high school behind him opens up more options for training. What kind of work is he hoping to find? A rough idea is fine.",
+        "quickReplies": [
+          "Healthcare",
+          "Trades / construction",
+          "Office / admin",
+          "Still deciding"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 13,
+    "name": "Looking for myself → final recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm looking for a clerk job in Placer County.",
+        "bot": "Clerk work in Placer County — we can zero in on records and legal openings. What's the highest level of education you have completed? The Administrative Legal Clerk - Entry listing asks for this.",
+        "quickReplies": [
+          "No diploma / GED yet",
+          "High school / GED",
+          "College degree",
+          "Bachelor's or higher"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "I have a GED and 3 years of clerical experience.",
+        "bot": "Thanks, I've updated that. Would you like to stay in roles like this one, or also consider a lead or supervisory role?",
+        "quickReplies": [
+          "Same kind of role",
+          "Supervisory roles",
+          "Open to both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Here's what the indexed sources say about office work training and services in or near Placer County:\n\nMetrix Learning offers access to over 5,000 courses, including Microsoft Office and Information Technology training, which are relevant to office work. [1,2,3] Golden Sierra provides job search assistance and counseling to people in Placer, El Dorado, and Alpine counties. [3]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described, 2 are related roles (1 more matched, but their deadlines have passed). For 1 of the matches, some published requirements couldn't be checked against what you shared — each card shows which. They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: whether there is a college degree, transport and current work status. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 3,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 14,
+    "name": "Correction",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I'm in El Dorado County, looking for admin work.",
+        "bot": "El Dorado County for office work gives us a clear starting point. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "Sorry, I meant Placer County, not El Dorado.",
+        "bot": "Placer County it is — that adjusts our starting point. Have you finished high school or a GED?",
+        "quickReplies": [
+          "GED / diploma done",
+          "Still working on it",
+          "Not started",
+          "Some college"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 15,
+    "name": "Follow-up question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What is the Elevate program?",
+        "bot": "The Elevate program is a scholarship program designed to encourage job training and employment among people who are either English language learners or low-income individuals. [1] Eligible participants can receive up to $1,000 when they complete job training in four semesters or less, and up to another $1,000 when they obtain training-related employment. [1] The program partners with Sierra College and offers over 20 career pathways, including business, accounting, cybersecurity, mechatronics, information technology, allied health, and construction. [1] The scholarship is only available to English language learners or low-income individuals. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "START"
+      },
+      {
+        "user": "Who can apply for it?",
+        "bot": "Only individuals who are English language learners or low-income individuals can apply for the Elevate scholarship. [1]",
+        "quickReplies": [],
+        "citations": 1,
+        "kind": "START"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 16,
+    "name": "Early recommendations",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want caregiver work.",
+        "bot": "Caregiver work gets you right into healthcare, hands-on. Which county are you in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      },
+      {
+        "user": "[results]",
+        "bot": "Here's what the indexed sources say about healthcare training:\n\nJob Connections is a free, monthly event designed to help job seekers learn about local employment opportunities, and this month features Sutter Health, Center of Excellence in Pharma, and UCDavis Health, with presentations starting at 2:00pm. [1] Regional Equity and Recovery Partnerships offers over 20 career pathways in partnership with Sierra College, including Allied Health, which prepares you for good jobs in target industry sectors. [2]\n\nI also checked the 12 indexed job listings against your role and the published requirements: 1 is the kind of role you described (1 more matched, but their deadlines have passed). They are listed below with their sources.\n\nWhether you qualify for any of these is confirmed by Golden Sierra staff, not by me.\n\nStill unknown: which county, diploma or GED status and current work status. Are you working at the moment?",
+        "quickReplies": [
+          "Not working",
+          "Recently laid off",
+          "Working, want better"
+        ],
+        "citations": 2,
+        "kind": "results"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 17,
+    "name": "Direct factual query",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "What services does Golden Sierra offer to employers?",
+        "bot": "Golden Sierra offers employers recruitment assistance, including posting job openings and getting them in front of a large pool of candidates, plus resume screening and pre-employment testing. [1,2] It also provides hiring incentives, financial incentives, and employee training. [2,3] Additionally, employers can use Golden Sierra’s professional facility to screen and interview job candidates in private rooms with flexible scheduling. [1]",
+        "quickReplies": [],
+        "citations": 3,
+        "kind": "START"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 18,
+    "name": "Unsupported question",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "Can you help me file my taxes?",
+        "bot": "I couldn't find enough information about that in the currently indexed knowledge base. I can help with finding work, exploring training, and job-search support — what would help you most?",
+        "quickReplies": [
+          "Find a job",
+          "Explore training",
+          "Both"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 19,
+    "name": "Missing qualifications",
+    "mode": "self",
+    "turns": [
+      {
+        "user": "I want to be an electrician. I have 1 year of experience and no license.",
+        "bot": "One year in and no license — that shapes our next steps. Do you have a driver's license? The Electrician listing asks for this.",
+        "quickReplies": [
+          "Yes",
+          "Not yet",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  },
+  {
+    "ui": "admin",
+    "scenario": 20,
+    "name": "Related-role matching",
+    "mode": "helper",
+    "turns": [
+      {
+        "user": "She worked as a cashier for 4 years and wants an office job.",
+        "bot": "Cashiering for four years gives her a strong customer-service foundation for office roles. Which county is she in?",
+        "quickReplies": [
+          "Placer",
+          "El Dorado",
+          "Alpine",
+          "Not sure"
+        ],
+        "citations": 0,
+        "kind": "question"
+      }
+    ],
+    "issues": []
+  }
+]

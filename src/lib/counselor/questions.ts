@@ -9,6 +9,7 @@ import { mergeContext, ruleExtract } from './extract';
 import { requirementVerdicts, type ProgramRow } from './matching';
 import { focusQueries } from '../conversation/focus';
 import { relatedOf } from '../jobs/occupations';
+import { person } from '../conversation/voice';
 
 /**
  * Adaptive next-question selection.
@@ -53,6 +54,8 @@ export type Question = {
 };
 
 const s = (mode: SessionMode) => SUBJECT[mode];
+const who = (mode: SessionMode, ctx?: CounselorContext) => person({ mode, pronoun: ctx?.pronoun });
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 /** Questions about a job seeker's own situation do not apply to an employer. */
 const seeker = (ctx: CounselorContext) => ctx.audience !== 'employer';
 
@@ -65,8 +68,7 @@ export const QUESTIONS: Question[] = [
     // is already implied — asking "are you looking for work yourself" there
     // just confuses them. Only ask when it is genuinely ambiguous.
     applicable: (ctx) => ctx.mode === 'self',
-    prompt: () =>
-      'Quick check so I point you the right way — are you looking for work yourself, or hiring for a business?',
+    prompt: () => 'Are you looking for work yourself, or hiring for a business?',
     quickReplies: () => [
       { label: 'Looking for work', value: 'I am looking for work' },
       { label: "I'm an employer", value: 'I am an employer looking to hire' },
@@ -76,8 +78,7 @@ export const QUESTIONS: Question[] = [
     id: 'county',
     field: 'county',
     baseValue: 0.85,
-    prompt: (mode) =>
-      `Which county ${s(mode).pronoun === 'you' ? 'are you' : 'are they'} in? It decides which offices and providers are reachable.`,
+    prompt: (mode, ctx) => `Which county ${who(mode, ctx).be} ${who(mode, ctx).subj} in?`,
     quickReplies: () => [
       { label: 'Placer', value: 'Placer County' },
       { label: 'El Dorado', value: 'El Dorado County' },
@@ -89,8 +90,7 @@ export const QUESTIONS: Question[] = [
     id: 'careerInterest',
     field: 'careerInterest',
     baseValue: 0.7,
-    prompt: (mode) =>
-      `What kind of work ${s(mode).pronoun === 'you' ? 'are you' : 'are they'} aiming for? Even a rough direction helps.`,
+    prompt: (mode, ctx) => `What kind of work ${who(mode, ctx).be} ${who(mode, ctx).subj} hoping to find? A rough idea is fine.`,
     quickReplies: () => [
       { label: 'Healthcare', value: 'Interested in healthcare' },
       { label: 'Trades / construction', value: 'Interested in the trades or construction' },
@@ -103,8 +103,7 @@ export const QUESTIONS: Question[] = [
     id: 'education',
     field: 'education',
     baseValue: 0.65,
-    prompt: (mode) =>
-      `Where ${s(mode).pronoun === 'you' ? 'are you' : 'are they'} up to with a high school diploma or GED? Some training needs it first, some doesn't.`,
+    prompt: (mode, ctx) => `${cap(who(mode, ctx).haveQ)} finished high school or a GED?`,
     quickReplies: () => [
       { label: 'GED / diploma done', value: 'GED or high school diploma completed' },
       { label: 'Still working on it', value: 'Still working on the GED' },
@@ -119,7 +118,7 @@ export const QUESTIONS: Question[] = [
     baseValue: 0.6,
     prompt: (mode, ctx) => {
       const where = ctx.city ?? ctx.county ?? 'the area';
-      return `One thing that changes the options a lot — can ${s(mode).pronoun} reliably get to ${where}-area providers?`;
+      return `Can ${who(mode, ctx).subj} reliably get around ${where === 'the area' ? 'the area' : `the ${where} area`}, for example by car or bus?`;
     },
     quickReplies: () => [
       { label: 'Has a car', value: 'Has reliable transport — a car' },
@@ -133,21 +132,33 @@ export const QUESTIONS: Question[] = [
     id: 'incomeUrgency',
     field: 'incomeUrgency',
     baseValue: 0.75,
-    prompt: (mode) =>
-      `${s(mode).pronoun === 'you' ? 'Do you' : 'Do they'} need income coming in soon, or is there room to train first?`,
-    quickReplies: () => [
-      { label: 'Needs income now', value: 'Needs income as soon as possible' },
-      { label: 'Can train first', value: 'Can focus on training for a few months' },
-      { label: 'Open to both', value: 'Open to either' },
+    // Also the starting-point question: it separates job-search help from training.
+    prompt: (mode, ctx) =>
+      mode === 'helper'
+        ? ctx?.pronoun
+          ? `What kind of help ${who(mode, ctx).do} ${who(mode, ctx).subj} need most right now?`
+          : 'What kind of help does the person you’re supporting need right now?'
+        : `${who(mode, ctx).BeQ} mainly looking for a job, training, or both?`,
+    quickReplies: (mode) => [
+      ...(mode === 'helper'
+        ? [
+            { label: 'Finding work', value: 'They need work soon' },
+            { label: 'Career training', value: "They'd like to train first" },
+            { label: 'Not sure yet', value: 'Not sure yet' },
+          ]
+        : [
+            { label: 'Find a job', value: 'I need a job soon' },
+            { label: 'Explore training', value: "I'd like to train first" },
+            { label: 'Both', value: 'Open to both' },
+          ]),
     ],
-    applicable: seeker,
+    applicable: (ctx) => seeker(ctx) && !ctx.jobGoalStated,
   },
   {
     id: 'employmentStatus',
     field: 'employmentStatus',
     baseValue: 0.5,
-    prompt: (mode) =>
-      `And ${s(mode).pronoun === 'you' ? 'are you' : 'are they'} working at the moment?`,
+    prompt: (mode, ctx) => `${who(mode, ctx).BeQ} working at the moment?`,
     quickReplies: () => [
       { label: 'Not working', value: 'Not currently working' },
       { label: 'Recently laid off', value: 'Recently laid off' },
@@ -159,8 +170,7 @@ export const QUESTIONS: Question[] = [
     id: 'age',
     field: 'age',
     baseValue: 0.55,
-    prompt: (mode) =>
-      `How old ${s(mode).pronoun === 'you' ? 'are you' : 'are they'}? Some youth programmes have an age range.`,
+    prompt: (mode, ctx) => `How old ${who(mode, ctx).be} ${who(mode, ctx).subj}? Some youth programs have an age range.`,
     quickReplies: () => [
       { label: 'Under 18', value: 'Under 18' },
       { label: '18–24', value: 'Aged 18 to 24' },
@@ -173,10 +183,9 @@ export const QUESTIONS: Question[] = [
     id: 'rolePreference',
     field: 'rolePreference',
     baseValue: 0.6,
-    prompt: (mode) =>
-      `Would ${s(mode).pronoun} prefer to keep doing hands-on technical work, or ${s(mode).pronoun === 'you' ? 'would you' : 'would they'} consider a supervisory or lead role?`,
+    prompt: (mode, ctx) => `Would ${who(mode, ctx).subj} like to stay in roles like this one, or also consider a lead or supervisory role?`,
     quickReplies: () => [
-      { label: 'Technical work', value: 'Hands-on technical work' },
+      { label: 'Same kind of role', value: 'Hands-on technical work' },
       { label: 'Supervisory roles', value: 'Supervisory or lead roles' },
       { label: 'Open to both', value: 'Open to both technical and supervisory roles' },
     ],

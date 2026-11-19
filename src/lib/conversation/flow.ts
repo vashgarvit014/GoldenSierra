@@ -1,3 +1,4 @@
+import { clarificationText, leadIn, person } from './voice';
 import { z } from 'zod';
 import { getLlmClient } from '../ai/client';
 import { env, hasLlm } from '../env';
@@ -8,7 +9,7 @@ import { structuredTokenBudget } from '../ai/prompts';
 import { changedFields, extractContext, mergeContext } from '../counselor/extract';
 import { buildKnownFacts, loadPrograms, matchPrograms, rankMatches } from '../counselor/matching';
 import { QUESTIONS, readyForResults, selectNextQuestion, type Question } from '../counselor/questions';
-import { completeTurn, type PreparedTurn } from '../rag/generate';
+import { completeTurn, generateAnswer, type PreparedTurn } from '../rag/generate';
 import { GENERATION_FAILED_TEXT, NO_ANSWER_TEXT } from '../rag/strict';
 import { completeAnswer } from '../ai/complete';
 import { cardsFromCitations, prepareGuidedResults, type Focus } from './evidence';
@@ -162,92 +163,7 @@ const WHY: Record<Question['id'], string> = {
   rolePreference: 'Some related openings are hands-on and some are lead roles.',
 };
 
-const ACK_SYSTEM = `You write the opening of a workforce counselor's reply. You have NOT looked anything up yet.
-
-Return JSON only: {"acknowledgement": "...", "observation": "..."}
-- acknowledgement: ONE short sentence recognising what the user just said (what is new, not everything). If they corrected something, say you've updated it.
-- observation: ONE short sentence on what you will look for next, or why the pending question matters.
-
-Hard rules:
-- Never state facts about programs, services, providers, eligibility, costs, wages, locations, schedules or requirements. Never name a program.
-- Never say anyone is eligible or qualifies.
-- Do not ask a question. Do not greet. No lists.
-- In HELPER mode the user is asking about someone else: say "they/them/their" (or "she/he" only if the user did), never "you".`;
-
-const AckSchema = z.object({ acknowledgement: z.string().min(2).max(300), observation: z.string().max(300).optional().default('') });
-
-/** A sentence that asserts something about services, money, eligibility or names — not allowed without a citation. */
-const FACT_WORDS = /\b(offers?|offered|provides?|provided|runs?|funds?|funded|pays?|paid|covers?|eligib\w*|qualif\w*|scholarships?|stipends?|grants?|wages?|salar\w*|certif\w*|located|requires?|required|free of charge|no cost|enrol\w*|guarantee\w*|program(me)?s? (called|named))\b/i;
-
-/**
- * Removes any sentence that would state an uncited fact: fact words, figures/links/emails the
- * user did not write, or multi-word proper names the user did not use.
- */
-export function stripUncitedFacts(text: string, userText: string): string {
-  const user = userText.toLowerCase();
-  const allowedName = (name: string) => user.includes(name.toLowerCase()) || /^(golden sierra|placer county|el dorado county|alpine county|el dorado)$/i.test(name);
-  // Split only at sentence ends (a link like www.example.org must stay inside its sentence).
-  return text.split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => {
-      if (!s) return false;
-      if (FACT_WORDS.test(s)) return false;
-      if (/https?:|www\.|@|\$/.test(s)) return false;
-      for (const fig of s.match(/\d[\d,.:-]*/g) ?? []) if (!user.includes(fig.replace(/[.,:-]+$/, ''))) return false;
-      const names = s.slice(1).match(/\b[A-Z][a-z]+(?:\s+(?:of|and|&)?\s*[A-Z][a-z]+)+\b/g) ?? [];
-      if (names.some((n) => !allowedName(n))) return false;
-      return true;
-    })
-    .join(' ');
-}
-
-async function acknowledge(args: {
-  ctx: CounselorContext;
-  message: string;
-  newFacts: Record<string, string>;
-  corrections: string[];
-  next: string;
-  history: { role: string; content: string }[];
-}): Promise<string> {
-  const fallback = `${args.corrections.length ? "Thanks — I've updated that." : 'Got it.'} ${args.next}`.trim();
-  if (!hasLlm()) return fallback;
-  try {
-    const response = await withTimeout(
-      getLlmClient().chat.completions.create({
-        model: env.LLM_MODEL,
-        temperature: 0.3,
-        max_tokens: structuredTokenBudget(160),
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: ACK_SYSTEM },
-          ...args.history.slice(-2).map((h) => ({ role: h.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: h.content.slice(0, 400) })),
-          {
-            role: 'user',
-            content: [
-              `Mode: ${args.ctx.mode === 'helper' ? 'HELPER' : 'SELF'}`,
-              `New this turn: ${JSON.stringify(args.newFacts)}`,
-              args.corrections.length ? `Corrected: ${args.corrections.join(', ')}` : '',
-              `What happens next: ${args.next}`,
-              `User said: "${args.message.slice(0, 500)}"`,
-            ].filter(Boolean).join('\n'),
-          },
-        ],
-      }),
-      15_000,
-      'flow acknowledgement',
-    );
-    const data = parseModelJson(response.choices[0]?.message?.content, (v) => {
-      const r = AckSchema.safeParse(v);
-      return r.success ? ({ success: true, data: r.data } as const) : ({ success: false, issues: r.error.issues.map((i) => i.message) } as const);
-    }, 'Flow acknowledgement');
-    if (!data) return fallback;
-    const safe = stripUncitedFacts(`${data.acknowledgement} ${data.observation}`.replace(/\?/g, '.'), args.message);
-    return safe.length >= 8 ? safe : fallback;
-  } catch (err) {
-    logger.warn('Flow acknowledgement unavailable; using deterministic wording', { error: err instanceof Error ? err.message : String(err) });
-    return fallback;
-  }
-}
+export { stripUncitedFacts } from './voice';
 
 // ───────────────────────── the turn ─────────────────────────
 
@@ -279,13 +195,35 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   // ── UNDERSTAND ──
   const { updates } = await extractContext(input.message, before, history);
   // A short reply ("Yes", "2-4 years") is read against the qualification question it answers.
-  const ctx = mergeContext(mergeContext(before, updates), answerToPending(input.flow.pendingQuestion, input.message));
+  const pendingAnswer = answerToPending(input.flow.pendingQuestion, input.message);
+  const ctx = mergeContext(mergeContext(before, updates), pendingAnswer);
   const corrections = changedFields(before, ctx);
   const beforeFacts = knownFactsRecord(before);
   const nowFacts = knownFactsRecord(ctx);
   const newFacts = Object.fromEntries(Object.entries(nowFacts).filter(([k, v]) => beforeFacts[k] !== v));
   const contextChanged = Object.keys(newFacts).length > 0;
   const hadResults = input.flow.stage === 'SHOWING_RESULTS' || input.flow.stage === 'FOLLOW_UP';
+
+  // ── A question that tells us nothing about their situation is answered from the documents ──
+  // ("Can you help me with my taxes?", "Who runs the Auburn office?"). The guided conversation is left
+  // exactly where it was; an unsupported topic gets the no-answer text and a pointer to what we can do.
+  if (!input.forceResults && !hadResults && !contextChanged && Object.keys(pendingAnswer).length === 0 && /\?\s*$/.test(input.message)) {
+    const result = await generateAnswer({ message: input.message, history: input.history.slice(-6), profile: {} });
+    const supported = result.answer !== NO_ANSWER_TEXT && result.payload.citations.length > 0;
+    const s0 = person(ctx);
+    const answer = supported
+      ? result.answer
+      : `${result.answer} I can help with finding work, exploring training, and job-search support — what ${s0.subj === 'you' ? 'would help you most' : `would help ${s0.obj} most`}?`;
+    const payload: AssistantPayload = {
+      ...result.payload,
+      flow: FlowPayloadSchema.parse({
+        stage: input.flow.stage, route: 'factual', question: supported ? null : 'What would help most?',
+        quickReplies: supported ? [] : (QUESTIONS.find((q) => q.id === 'incomeUrgency')!.quickReplies(ctx.mode)),
+        knownFacts: nowFacts, uncertainties: [], canShowResults: Object.keys(nowFacts).length >= 1, corrections: [],
+      }),
+    };
+    return { answer, payload, flow: { ...input.flow, context: ctx }, prepared: null, path };
+  }
 
   // ── decide: one more question, or results ──
   let matches: ReturnType<typeof rankMatches> = [];
@@ -317,7 +255,7 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     const stage = transition(input.flow.stage, { type: 'ASK', knownCount: Object.keys(nowFacts).length });
     path.push(stage);
     const base = qual.question.prompt(ctx.mode, ctx).replace(/\s+/g, ' ').trim();
-    const question = `Before I show results — one detail would make them more accurate. ${base}`;
+    const question = `One detail would make the results more accurate: ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
     const flow: FlowState = { stage, context: ctx, askedQuestions: [...asked, qual.question.id], pendingQuestion: qual.question.id, preResultsAsked: true, resultsRequested: true };
     const payload = basePayload(started, {
       stage, route: 'personal', question,
@@ -342,7 +280,13 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
   // separates job-search help from training), acknowledging what they did say first.
   const reask = !ready && !fresh && pending ? selectNextQuestion(ctx, matches, asked, programs, jobs) : null;
   // Missing information that decides a MANDATORY requirement of a shortlisted listing comes first.
-  const choice = !ready && qual ? { question: qual.question, gain: 1 } : fresh ?? (reask?.question.id === pending ? reask : null);
+  // With no direction at all yet ("I'm not sure where to start"), the first question is the starting
+  // point — a job, training, or both — rather than a detail like the county.
+  const goal = QUESTIONS.find((q) => q.id === 'incomeUrgency')!;
+  // "I need a job" already says which: then the next most useful detail is asked instead.
+  const statedJobGoal = Boolean(ctx.jobGoalStated) || Boolean(ctx.employmentStatus);
+  const noDirection = !statedJobGoal && !ctx.careerInterest && !ctx.occupations?.length && !ctx.experience?.length && !ctx.incomeUrgency && ctx.audience !== 'employer' && !asked.includes('incomeUrgency');
+  const choice = !ready && qual ? { question: qual.question, gain: 1 } : !ready && noDirection ? { question: goal, gain: 1 } : fresh ?? (reask?.question.id === pending ? reask : null);
   const subject = SUBJECT[ctx.mode];
 
   // ── CLARIFY ──
@@ -350,13 +294,13 @@ export async function runGuidedTurn(input: GuidedTurnInput): Promise<GuidedTurnO
     const stage = transition(input.flow.stage, { type: 'ASK', knownCount: Object.keys(nowFacts).length });
     path.push(stage);
     const base = choice.question.prompt(ctx.mode, ctx).replace(/\s+/g, ' ').trim();
-    const question = choice === reask ? `One thing would still help most: ${base.charAt(0).toLowerCase()}${base.slice(1)}` : base;
-    const lead = await acknowledge({ ctx, message: input.message, newFacts, corrections, next: WHY[choice.question.id] ?? 'Published job requirements depend on this, so it changes which listings are a real fit.', history });
-    const answer = `${lead}\n\n${question}`;
+    const question = choice === reask ? `It would still help to know: ${base.charAt(0).toLowerCase()}${base.slice(1)}` : base;
+    const lead = await leadIn({ ctx, message: input.message, newFacts, corrections, history, why: WHY[choice.question.id] ?? 'Published job requirements depend on this.' });
+    const answer = clarificationText(lead, question);
     const flow: FlowState = { stage, context: ctx, askedQuestions: [...asked, choice.question.id], pendingQuestion: choice.question.id };
     const payload = basePayload(started, {
       stage, route: 'personal', question,
-      quickReplies: choice.question.quickReplies(ctx.mode),
+      quickReplies: choice.question.quickReplies(ctx.mode).slice(0, 4),
       knownFacts: nowFacts, uncertainties: [], canShowResults: Object.keys(nowFacts).length >= 1, corrections,
     });
     payload.navigator = { narrowing };
@@ -517,7 +461,7 @@ export function composeResults(a: {
     if (jobLine) parts.push(jobLine);
     if (anyJobs) parts.push(`Whether ${s.pronoun} meet a listing's requirements is for the employer to decide; check the posting before applying.`);
   } else {
-    parts.push(`${updated}Based on what you've shared, I searched the indexed sources for ${list}. Here is what they describe:`, a.verified);
+    parts.push(`${updated}Here's what the indexed sources say about ${list}:`, a.verified);
     if (a.uncovered?.length) parts.push(`I didn't find indexed information on ${join(a.uncovered)}.`);
     if (jobLine) parts.push(jobLine);
     parts.push(`Whether ${s.pronoun} qualify for any of these is confirmed by Golden Sierra staff, not by me.`);

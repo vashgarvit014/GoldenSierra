@@ -5,6 +5,9 @@ import type { Question } from '../counselor/questions';
 import type { ContextUpdate } from '../counselor/extract';
 import type { CounselorContext, QuickReply } from '@/types/counselor';
 import type { JobMatch } from '@/types/navigator';
+import { listingReason, person } from './voice';
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /**
  * Qualification questions chosen from the published requirements of the shortlisted listings.
@@ -21,14 +24,8 @@ export type QualQuestion = { key: string; impact: number; listings: string[]; qu
 const SHORTLIST = 5;
 
 function subject(ctx: CounselorContext) {
-  const self = ctx.mode === 'self';
-  return {
-    s: self ? 'you' : 'they',
-    Subj: self ? 'I' : 'They',
-    have: 'have',
-    dont: "don't",
-    haveQ: self ? 'do you have' : 'do they have',
-  };
+  const p = person(ctx);
+  return { s: p.subj, haveQ: p.doHave, has: p.speakerHas, hasNot: p.speakerHasNot, p };
 }
 
 /** Facts that decide unknown mandatory requirements of the shortlist, with how many listings each decides. */
@@ -49,8 +46,20 @@ export function shortlistOf(matches: JobMatch[]): JobMatch[] {
   return matches.filter((m) => m.listingStatus !== 'closed').slice(0, SHORTLIST);
 }
 
+/**
+ * The listings whose requirements are worth asking about: the role they described when there is one,
+ * otherwise a related role (not a supervisory step up). Same-field or transferable-skill listings never drive a question — a clerk
+ * is not asked about a degree that only a neighbouring accounting listing requires.
+ */
+export function targetShortlist(matches: JobMatch[]): JobMatch[] {
+  const open = shortlistOf(matches);
+  const exact = open.filter((m) => m.kind === 'exact');
+  // A supervisory step up from a past role (cashier → sales manager) is not what they asked about.
+  return exact.length ? exact : open.filter((m) => m.kind === 'related' && m.relation !== 'supervisory');
+}
+
 export function qualificationQuestion(ctx: CounselorContext, matches: JobMatch[], asked: string[]): QualQuestion | null {
-  const gaps = [...qualificationGaps(shortlistOf(matches)).entries()].filter(([k]) => !asked.includes(`qual:${k}`));
+  const gaps = [...qualificationGaps(targetShortlist(matches)).entries()].filter(([k]) => !asked.includes(`qual:${k}`));
   if (!gaps.length) return null;
   gaps.sort((a, b) => b[1].length - a[1].length || PRIORITY(a[0]) - PRIORITY(b[0]));
   const [key, listings] = gaps[0]!;
@@ -64,29 +73,29 @@ function asQuestion(id: string, prompt: string, replies: QuickReply[]): Question
 
 function build(key: string, ctx: CounselorContext, listings: string[]): Question | null {
   const w = subject(ctx);
-  const which = listings.length === 1 ? `The ${listings[0]} listing asks for it.` : `${listings.length} of the matching listings ask for it.`;
+  const which = listingReason(listings);
   if (key === 'edu') {
     const f = educationFacts(ctx);
     if (f[1] === 'has') {
-      return asQuestion('qual:edu', `Have ${w.s} completed a college degree? ${which}`, [
-        { label: 'No college degree', value: `${w.Subj} ${w.dont} have a college degree` },
-        { label: 'Associate degree', value: `${w.Subj} ${w.have} an associate degree` },
-        { label: "Bachelor's or higher", value: `${w.Subj} ${w.have} a bachelor's degree` },
+      return asQuestion('qual:edu', `${cap(w.p.haveQ)} also completed a college degree? ${which}`, [
+        { label: 'No college degree', value: `${w.hasNot} a college degree` },
+        { label: 'Associate degree', value: `${w.has} an associate degree` },
+        { label: "Bachelor's or higher", value: `${w.has} a bachelor's degree` },
       ]);
     }
-    return asQuestion('qual:edu', `What's the highest level of education ${w.s} have completed? ${which}`, [
-      { label: 'No diploma / GED yet', value: `${w.Subj} haven't completed a high school diploma or GED` },
+    return asQuestion('qual:edu', `What's the highest level of education ${w.s} ${w.p.have} completed? ${which}`, [
+      { label: 'No diploma / GED yet', value: `${w.p.Speaker} ${w.p.Speaker === 'I' || w.p.Speaker === 'They' ? "haven't" : "hasn't"} completed a high school diploma or GED` },
       { label: 'High school / GED', value: 'Highest education is high school / GED' },
-      { label: 'College degree', value: `${w.Subj} ${w.have} a college degree` },
-      { label: "Bachelor's or higher", value: `${w.Subj} ${w.have} a bachelor's degree` },
+      { label: 'College degree', value: `${w.has} a college degree` },
+      { label: "Bachelor's or higher", value: `${w.has} a bachelor's degree` },
     ]);
   }
   if (key.startsWith('cert:')) {
     const label = certLabel(key.slice(5));
     const article = /^[aeiou]/i.test(label) ? 'an' : 'a';
-    return asQuestion(`qual:${key}`, `${w.haveQ[0]!.toUpperCase()}${w.haveQ.slice(1)} ${article} ${label}? ${which}`, [
-      { label: 'Yes', value: `${w.Subj} ${w.have} ${article} ${label}` },
-      { label: 'Not yet', value: `${w.Subj} ${w.dont} have ${article} ${label}` },
+    return asQuestion(`qual:${key}`, `${cap(w.haveQ)} ${article} ${label}? ${which}`, [
+      { label: 'Yes', value: `${w.has} ${article} ${label}` },
+      { label: 'Not yet', value: `${w.hasNot} ${article} ${label}` },
       { label: 'Not sure', value: `Not sure about the ${label}` },
     ]);
   }
@@ -100,7 +109,7 @@ function build(key: string, ctx: CounselorContext, listings: string[]): Question
     ]);
   }
   if (key === 'age') {
-    return asQuestion('qual:age', `${w.s === 'you' ? 'Are you' : 'Are they'} 18 or older? ${which}`, [
+    return asQuestion('qual:age', `${w.p.BeQ} 18 or older? ${which}`, [
       { label: '18 or older', value: '18 or older' },
       { label: 'Under 18', value: 'Under 18' },
     ]);

@@ -33,6 +33,14 @@ async function verify(label: string, t: CounselorTurn) {
   const docs = await prisma.document.findMany({ where: { url: { in: t.sources.map((s) => s.url!).filter(Boolean) } }, include: { chunks: { select: { content: true, headingPath: true } } } });
   check(`${label}: every source is an indexed, public document`, t.sources.every((s) => docs.some((d) => d.url === s.url && d.status === 'INDEXED' && d.accessLevel === 'PUBLIC')), JSON.stringify(t.sources));
   for (const card of t.recommendations) {
+    // Job cards come from extracted job listings (verified verbatim at extraction), not the program catalogue.
+    if (card.slug.startsWith('job-')) {
+      const row = await prisma.jobListing.findUnique({ where: { id: card.slug.slice(4) }, include: { document: true } });
+      const ok = Boolean(row && card.name.startsWith(row.title) && row.segment.includes(row.title) && [row.applyUrl, row.sourceUrl, row.document.url].includes(card.officialUrl) && row.document.status === 'INDEXED');
+      check(`${label}: job card "${card.name}" is an indexed listing, title verbatim, link from the listing`, ok, JSON.stringify({ found: Boolean(row), url: card.officialUrl }));
+      check(`${label}: job card "${card.name}" asserts no eligibility`, card.state === 'needs_verification' && card.contactPhone === null);
+      continue;
+    }
     const program = await prisma.program.findUnique({ where: { slug: card.slug }, include: { documents: true } });
     const doc = docs.find((d) => d.url === card.officialUrl);
     const linked = Boolean(program && doc && program.documents.some((pd) => pd.documentId === doc.id));

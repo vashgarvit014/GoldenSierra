@@ -8,6 +8,7 @@ import { clientIpFrom, enforceRateLimit, hashIdentifier } from '@/lib/rate-limit
 import { createSession, loadSession } from '@/lib/session';
 import { isFactualLookup, lookupTurn } from '@/lib/counselor/lookup';
 import { runTurn } from '@/lib/counselor/engine';
+import { readFlow } from '@/lib/conversation/flow';
 import type { CounselorContext, SessionMode } from '@/types/counselor';
 
 export const runtime = 'nodejs';
@@ -38,17 +39,16 @@ const TurnSchema = z.object({
 type StoredState = {
   counselor?: CounselorContext;
   askedQuestions?: string[];
+  /** Guided-flow state shared with the admin chat (stage, pending question, results requested). */
+  flow?: unknown;
 };
 
 function emptyContext(mode: SessionMode): CounselorContext {
   // A helper is, by definition, supporting someone toward work — recording it
   // here saves asking a question whose answer we already have.
-  return {
-    mode,
-    population: [],
-    barriers: [],
-    ...(mode === 'helper' ? { audience: 'job_seeker' as const } : {}),
-  };
+  // Either mode on this screen means someone looking for work (an employer says so, and that wins),
+  // so "are you looking for work or hiring?" is never asked after a mode was chosen.
+  return { mode, population: [], barriers: [], audience: 'job_seeker' as const };
 }
 
 export const POST = withErrorHandling(async (request: Request) => {
@@ -92,11 +92,14 @@ export const POST = withErrorHandling(async (request: Request) => {
     history: history.map((h) => ({ role: h.role, content: h.content })),
     askedQuestions: stored.askedQuestions ?? [],
     forceResults: body.forceResults,
+    flow: stored.flow ? readFlow(stored.flow) : undefined,
   };
   // A direct factual question is answered from the indexed documents; personal
   // workforce questions continue through the adaptive counselor flow.
-  const { turn, askedQuestions } =
-    !body.forceResults && isFactualLookup(message) ? await lookupTurn(turnInput) : await runTurn(turnInput);
+  const { turn, askedQuestions, flow } =
+    !body.forceResults && isFactualLookup(message)
+      ? { ...(await lookupTurn(turnInput)), flow: turnInput.flow }
+      : await runTurn(turnInput);
 
   const saved = await prisma.chatMessage.create({
     data: {
@@ -111,7 +114,7 @@ export const POST = withErrorHandling(async (request: Request) => {
   await prisma.chatSession.update({
     where: { id: session.id },
     data: {
-      profile: { counselor: turn.context, askedQuestions } as never,
+      profile: { counselor: turn.context, askedQuestions, ...(flow ? { flow } : {}) } as never,
       lastActiveAt: new Date(),
     },
   });

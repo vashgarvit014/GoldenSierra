@@ -51,8 +51,8 @@ beforeEach(() => {
   mocks.llm.mockImplementation(async (req: { messages: { role: string; content: string }[] }) => {
     const system = req.messages[0]!.content;
     if (system.includes('You extract workforce facts')) return reply('{}');
-    if (system.includes("opening of a workforce counselor")) {
-      return reply(JSON.stringify({ acknowledgement: 'Got it — she is 19 and interested in healthcare.', observation: 'Golden Sierra offers a free CNA course for foster youth.' }));
+    if (system.includes("first sentence of a workforce counselor")) {
+      return reply(JSON.stringify({ lead: 'At 19 and drawn to healthcare, she has a clear place to start. Golden Sierra offers a free CNA course for foster youth.' }));
     }
     return reply(generation);
   });
@@ -66,7 +66,7 @@ describe('guided turn: clarification', () => {
     const out = await turn(FOSTER);
     expect(['DISCOVERING_NEEDS', 'CLARIFYING']).toContain(out.payload.flow!.stage);
     expect(out.answer.match(/\?/g)).toHaveLength(1);
-    expect(out.answer).toContain('Got it — she is 19 and interested in healthcare.');
+    expect(out.answer).toContain('At 19 and drawn to healthcare, she has a clear place to start.');
     expect(out.answer).not.toMatch(/CNA|offers/); // the model's invented observation was removed
     expect(out.payload.flow!.quickReplies.length).toBeGreaterThanOrEqual(2);
     expect(out.payload.flow!.quickReplies.length).toBeLessThanOrEqual(4);
@@ -81,7 +81,7 @@ describe('guided turn: clarification', () => {
     const pending = first.flow.pendingQuestion!;
     const second = await turn('She has no reliable transportation and lives near Auburn.', first.flow);
     expect(second.payload.flow!.knownFacts.geography).toMatch(/Auburn/);
-    if (second.flow.pendingQuestion === pending) expect(second.payload.flow!.question).toMatch(/^One thing would still help most/);
+    if (second.flow.pendingQuestion === pending) expect(second.payload.flow!.question).toMatch(/^It would still help to know/);
     const third = await turn('She likes working with people.', second.flow);
     expect(third.flow.askedQuestions.filter((q) => q === pending).length).toBeLessThanOrEqual(2);
   });
